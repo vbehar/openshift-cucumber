@@ -2,6 +2,8 @@
 
 **Cucumber steps definitions for the OpenShift API.**
 
+[![GoDoc](https://godoc.org/github.com/vbehar/openshift-cucumber?status.svg)](https://godoc.org/github.com/vbehar/openshift-cucumber)
+
 This project provides [Cucumber](https://github.com/cucumber/cucumber) [step definitions](https://github.com/cucumber/cucumber/wiki/Step-Definitions) to execute tests on an [OpenShift](http://www.openshift.org/) instance.
 
 It allows you to write things like 
