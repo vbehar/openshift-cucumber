@@ -2,13 +2,9 @@ language: go
 
 go: 1.4.2
 
-env:
-  global:
-    - BUILD_OS_ARCH="linux/amd64 darwin/amd64 windows/amd64"
-
 before_install:
   - go get github.com/mitchellh/gox
-  - gox -build-toolchain -osarch="${BUILD_OS_ARCH}"
+  - gox -build-toolchain -osarch="linux/amd64 darwin/amd64 windows/amd64"
 
 install:
   # We override the install phase to avoid the default "go get ... / godep restore"
@@ -19,5 +15,13 @@ install:
 #before_script:
 #  - go vet ./...
 
+script:
+  - go test -v ./...
+  - gox -output="build/{{.OS}}/{{.Arch}}/{{.Dir}}" -osarch="linux/amd64 darwin/amd64 windows/amd64"
+
 after_success:
-  - gox -output="build/{{.OS}}/{{.Arch}}/{{.Dir}}" -osarch="${BUILD_OS_ARCH}"
+  # deploy to bintray from the master branch only
+  - test ${TRAVIS_BRANCH} != "master" && exit
+  - curl -T build/linux/amd64/openshift-cucumber -uvbehar:${BINTRAY_KEY} "https://api.bintray.com/content/vbehar/openshift-cucumber/openshift-cucumber/build-${TRAVIS_BUILD_NUMBER}/linux-amd64/openshit-cucumber?publish=1"
+  - curl -T build/darwin/amd64/openshift-cucumber -uvbehar:${BINTRAY_KEY} "https://api.bintray.com/content/vbehar/openshift-cucumber/openshift-cucumber/build-${TRAVIS_BUILD_NUMBER}/darwin-amd64/openshit-cucumber?publish=1"
+  - curl -T build/windows/amd64/openshift-cucumber.exe -uvbehar:${BINTRAY_KEY} "https://api.bintray.com/content/vbehar/openshift-cucumber/openshift-cucumber/build-${TRAVIS_BUILD_NUMBER}/windows-amd64/openshit-cucumber.exe?publish=1"
