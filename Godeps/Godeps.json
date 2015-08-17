@@ -258,6 +258,11 @@
 			"Rev": "23618ea0fc3faa3f43954ce8ff48e31f5c784212"
 		},
 		{
+			"ImportPath": "github.com/Sirupsen/logrus",
+			"Comment": "v0.7.3-4-gaaf92c9",
+			"Rev": "aaf92c95712104318fc35409745f1533aa5ff327"
+		},
+		{
 			"ImportPath": "github.com/beorn7/perks/quantile",
 			"Rev": "b965b613227fddccbfffe13eae360ed3fa822f8d"
 		},
