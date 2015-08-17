@@ -22,6 +22,6 @@ script:
 after_success:
   # deploy to bintray from the master branch only
   - test ${TRAVIS_BRANCH} != "master" && exit
-  - curl -T build/linux/amd64/openshift-cucumber -uvbehar:${BINTRAY_KEY} "https://api.bintray.com/content/vbehar/openshift-cucumber/openshift-cucumber/build-${TRAVIS_BUILD_NUMBER}/linux-amd64/openshit-cucumber?publish=1"
-  - curl -T build/darwin/amd64/openshift-cucumber -uvbehar:${BINTRAY_KEY} "https://api.bintray.com/content/vbehar/openshift-cucumber/openshift-cucumber/build-${TRAVIS_BUILD_NUMBER}/darwin-amd64/openshit-cucumber?publish=1"
-  - curl -T build/windows/amd64/openshift-cucumber.exe -uvbehar:${BINTRAY_KEY} "https://api.bintray.com/content/vbehar/openshift-cucumber/openshift-cucumber/build-${TRAVIS_BUILD_NUMBER}/windows-amd64/openshit-cucumber.exe?publish=1"
+  - curl -T build/linux/amd64/openshift-cucumber -uvbehar:${BINTRAY_KEY} "https://api.bintray.com/content/vbehar/openshift-cucumber/openshift-cucumber/build-${TRAVIS_BUILD_NUMBER}/linux-amd64/openshift-cucumber?publish=1"
+  - curl -T build/darwin/amd64/openshift-cucumber -uvbehar:${BINTRAY_KEY} "https://api.bintray.com/content/vbehar/openshift-cucumber/openshift-cucumber/build-${TRAVIS_BUILD_NUMBER}/darwin-amd64/openshift-cucumber?publish=1"
+  - curl -T build/windows/amd64/openshift-cucumber.exe -uvbehar:${BINTRAY_KEY} "https://api.bintray.com/content/vbehar/openshift-cucumber/openshift-cucumber/build-${TRAVIS_BUILD_NUMBER}/windows-amd64/openshift-cucumber.exe?publish=1"
