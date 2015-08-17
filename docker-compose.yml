@@ -1,0 +1,5 @@
+builder:
+  build: .
+  dockerfile: Dockerfile.build
+  volumes:
+    - $PWD:/go/src/github.com/vbehar/openshift-cucumber

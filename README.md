@@ -79,6 +79,20 @@ Pre-build binaries for the main platforms are available in [bintray](https://bin
 
 Then, you can run `godep go install` to build the `openshift-cucumber` executable (in `$GOPATH/bin`)
 
+To make things easier, you can use the provided `Dockerfile` to build in a Docker environment:
+
+* Build a docker image:
+
+  ```
+  docker build -t openshiftcucumber -f Dockerfile.build .
+  ```
+* And build the project in a container (the default command is `gox`, which will build binaries for the main platforms)
+
+  ```
+  docker run --rm -v $PWD:/go/src/github.com/vbehar/openshift-cucumber openshiftcucumber
+  ```
+* The binaries will be available in the `build` directory.
+
 ## License
 
 Copyright 2015 the original author or authors.
