@@ -43,7 +43,7 @@ func init() {
 		c.Before("@offline", func() {
 			c.setNamespace("offline")
 			c.setFactory(func() *clientcmd.Factory {
-				flags := pflag.NewFlagSet("openshift-cucumber", pflag.ContinueOnError)
+				flags := pflag.NewFlagSet("openshift-factory", pflag.ContinueOnError)
 				return clientcmd.New(flags)
 			}())
 		})

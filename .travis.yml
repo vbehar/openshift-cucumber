@@ -17,7 +17,7 @@ install:
 
 script:
   - go test -v ./...
-  - gox -output="build/{{.OS}}/{{.Arch}}/{{.Dir}}" -osarch="linux/amd64 darwin/amd64 windows/amd64"
+  - gox -ldflags="-X main.gitCommit ${TRAVIS_COMMIT} -X main.buildNumber ${TRAVIS_BUILD_NUMBER}" -output="build/{{.OS}}/{{.Arch}}/{{.Dir}}" -osarch="linux/amd64 darwin/amd64 windows/amd64"
 
 after_success:
   # deploy to bintray from the master branch only
