@@ -62,7 +62,15 @@ $ export OPENSHIFT_PASSWD="demo"
 $ openshift-cucumber examples
 ```
 
-## Building
+## Install
+
+Pre-build binaries for the main platforms are available in [bintray](https://bintray.com/vbehar/openshift-cucumber/openshift-cucumber/_latestVersion#files):
+
+* [darwin-amd64](https://dl.bintray.com/vbehar/openshift-cucumber/darwin-amd64/) (Mac OSX)
+* [linux-amd64](https://dl.bintray.com/vbehar/openshift-cucumber/linux-amd64/)
+* [windows-amd64](https://dl.bintray.com/vbehar/openshift-cucumber/windows-amd64/)
+
+## Building from sources
 
 `openshift-cucumber` is written in [Go](https://golang.org/). To build it, you need:
 
