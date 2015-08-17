@@ -1,12 +1,23 @@
 language: go
 
+go: 1.4.2
+
 env:
-  - GIMME_OS=linux GIMME_ARCH=amd64
-  - GIMME_OS=darwin GIMME_ARCH=amd64
-  - GIMME_OS=windows GIMME_ARCH=amd64
+  global:
+    - BUILD_OS_ARCH="linux/amd64 darwin/amd64 windows/amd64"
+
+before_install:
+  - go get github.com/mitchellh/gox
+  - gox -build-toolchain -osarch="${BUILD_OS_ARCH}"
 
 install:
-  - go get github.com/tools/godep
+  # We override the install phase to avoid the default "go get ... / godep restore"
+  # because we only want the deps from Godeps
+  - export GOPATH="${TRAVIS_BUILD_DIR}/Godeps/_workspace:$GOPATH"
+  - export PATH="${TRAVIS_BUILD_DIR}/Godeps/_workspace/bin:$PATH"
 
-script:
-  - godep go install
+before_script:
+  - go vet ./...
+
+after_success:
+  - gox -output="build/{{.OS}}/{{.Arch}}/{{.Dir}}" -osarch="${BUILD_OS_ARCH}"
