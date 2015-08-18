@@ -9,3 +9,6 @@ test:
     - docker run -v $PWD:/go/src/github.com/vbehar/openshift-cucumber openshiftcucumber
   override:
     - build/linux/amd64/openshift-cucumber --version
+general:
+  artifacts:
+    - build
