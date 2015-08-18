@@ -3,8 +3,9 @@
 **Cucumber steps definitions for the OpenShift API.**
 
 [![GoDoc](https://godoc.org/github.com/vbehar/openshift-cucumber?status.svg)](https://godoc.org/github.com/vbehar/openshift-cucumber)
-[![Travis](https://travis-ci.org/vbehar/openshift-cucumber.svg?branch=master)](https://travis-ci.org/vbehar/openshift-cucumber)
 [![Download](https://api.bintray.com/packages/vbehar/openshift-cucumber/openshift-cucumber/images/download.svg)](https://bintray.com/vbehar/openshift-cucumber/openshift-cucumber/_latestVersion#files)
+[![Travis](https://travis-ci.org/vbehar/openshift-cucumber.svg?branch=master)](https://travis-ci.org/vbehar/openshift-cucumber)
+[![Circle CI](https://circleci.com/gh/vbehar/openshift-cucumber/tree/master.svg?style=svg)](https://circleci.com/gh/vbehar/openshift-cucumber/tree/master)
 
 This project provides [Cucumber](https://github.com/cucumber/cucumber) [step definitions](https://github.com/cucumber/cucumber/wiki/Step-Definitions) to execute tests on an [OpenShift](http://www.openshift.org/) instance.
 
