@@ -8,7 +8,7 @@ test:
   pre:
     - docker run -v $PWD:/go/src/github.com/vbehar/openshift-cucumber openshiftcucumber
   override:
-    - build/linux/amd64/openshift-cucumber --version
+    - build/linux/amd64/openshift-cucumber --version | grep $CIRCLE_SHA1
 general:
   artifacts:
     - build

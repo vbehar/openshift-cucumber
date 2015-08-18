@@ -16,4 +16,4 @@ VOLUME /go/src/github.com/vbehar/openshift-cucumber
 
 WORKDIR /go/src/github.com/vbehar/openshift-cucumber
 
-CMD gox -output="build/{{.OS}}/{{.Arch}}/{{.Dir}}" -osarch="${BUILD_OS_ARCH}" -ldflags="-X main.gitCommit $(git rev-parse --short HEAD)"
+CMD gox -output="build/{{.OS}}/{{.Arch}}/{{.Dir}}" -osarch="${BUILD_OS_ARCH}" -ldflags="-X main.gitCommit $(git rev-parse HEAD)"
