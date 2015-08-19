@@ -7,9 +7,9 @@ import (
 
 	docker "github.com/fsouza/go-dockerclient"
 
-	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	utilerrors "github.com/GoogleCloudPlatform/kubernetes/pkg/util/errors"
 	"github.com/golang/glog"
+	kapi "k8s.io/kubernetes/pkg/api"
+	utilerrors "k8s.io/kubernetes/pkg/util/errors"
 
 	"github.com/openshift/origin/pkg/dockerregistry"
 	imageapi "github.com/openshift/origin/pkg/image/api"
@@ -136,7 +136,7 @@ func (r DockerRegistrySearcher) Search(terms ...string) (ComponentMatches, error
 		}
 
 		glog.V(4).Infof("checking Docker registry for %q", ref.String())
-		connection, err := r.Client.Connect(ref.Registry, r.AllowInsecure)
+		connection, err := r.Client.Connect(ref.Registry, r.AllowInsecure, false)
 		if err != nil {
 			if dockerregistry.IsRegistryNotFound(err) {
 				return nil, ErrNoMatch{value: term}
@@ -161,7 +161,7 @@ func (r DockerRegistrySearcher) Search(terms ...string) (ComponentMatches, error
 		glog.V(4).Infof("found image: %#v", image)
 
 		dockerImage := &imageapi.DockerImage{}
-		if err = kapi.Scheme.Convert(image, dockerImage); err != nil {
+		if err = kapi.Scheme.Convert(&image.Image, dockerImage); err != nil {
 			return nil, err
 		}
 

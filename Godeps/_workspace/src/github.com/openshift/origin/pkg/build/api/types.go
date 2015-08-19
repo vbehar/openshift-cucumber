@@ -3,8 +3,8 @@ package api
 import (
 	"time"
 
-	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
+	kapi "k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/util"
 )
 
 const (
@@ -12,6 +12,8 @@ const (
 	BuildAnnotation = "openshift.io/build.name"
 	// DeprecatedBuildLabel is old value of BuildLabel, it'll be removed in OpenShift 3.1.
 	DeprecatedBuildLabel = "build"
+	// BuildNumberAnnotation is an annotation whose value is the sequential number for this Build
+	BuildNumberAnnotation = "openshift.io/build.number"
 	// BuildLabel is the key of a Pod label whose value is the Name of a Build which is run.
 	BuildLabel = "openshift.io/build.name"
 )
@@ -397,6 +399,10 @@ const (
 	// availability of a new version of an image
 	ImageChangeBuildTriggerType           BuildTriggerType = "ImageChange"
 	ImageChangeBuildTriggerTypeDeprecated BuildTriggerType = "imageChange"
+
+	// ConfigChangeBuildTriggerType will trigger a build on an initial build config creation
+	// WARNING: In the future the behavior will change to trigger a build on any config change
+	ConfigChangeBuildTriggerType BuildTriggerType = "ConfigChange"
 )
 
 // BuildList is a collection of Builds.
@@ -462,6 +468,11 @@ type BuildRequest struct {
 
 	// From is the reference to the ImageStreamTag that triggered the build.
 	From *kapi.ObjectReference
+
+	// LastVersion (optional) is the LastVersion of the BuildConfig that was used
+	// to generate the build. If the BuildConfig in the generator doesn't match, a build will
+	// not be generated.
+	LastVersion *int
 }
 
 // BuildLogOptions is the REST options for a build log

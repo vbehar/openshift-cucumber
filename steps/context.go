@@ -6,7 +6,7 @@ import (
 	"github.com/openshift/origin/pkg/client"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 
-	kclient "github.com/GoogleCloudPlatform/kubernetes/pkg/client"
+	kclient "k8s.io/kubernetes/pkg/client"
 
 	"github.com/lsegal/gucumber"
 	"github.com/stretchr/testify/assert"

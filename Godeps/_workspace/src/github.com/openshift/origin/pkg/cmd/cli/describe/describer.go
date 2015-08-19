@@ -11,16 +11,16 @@ import (
 
 	"github.com/docker/docker/pkg/units"
 
-	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	kerrs "github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/meta"
-	kclient "github.com/GoogleCloudPlatform/kubernetes/pkg/client"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/fields"
-	kctl "github.com/GoogleCloudPlatform/kubernetes/pkg/kubectl"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
 	"github.com/docker/docker/pkg/parsers"
+	kapi "k8s.io/kubernetes/pkg/api"
+	kerrs "k8s.io/kubernetes/pkg/api/errors"
+	"k8s.io/kubernetes/pkg/api/meta"
+	kclient "k8s.io/kubernetes/pkg/client"
+	"k8s.io/kubernetes/pkg/fields"
+	kctl "k8s.io/kubernetes/pkg/kubectl"
+	"k8s.io/kubernetes/pkg/labels"
+	"k8s.io/kubernetes/pkg/runtime"
+	"k8s.io/kubernetes/pkg/util"
 
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
 	buildapi "github.com/openshift/origin/pkg/build/api"
@@ -320,22 +320,6 @@ func (d *BuildConfigDescriber) DescribeTriggers(bc *buildapi.BuildConfig, out *t
 	}
 }
 
-type sortableBuilds []buildapi.Build
-
-func (s sortableBuilds) Len() int {
-	return len(s)
-}
-
-func (s sortableBuilds) Less(i, j int) bool {
-	return s[i].CreationTimestamp.Before(s[j].CreationTimestamp)
-}
-
-func (s sortableBuilds) Swap(i, j int) {
-	t := s[i]
-	s[i] = s[j]
-	s[j] = t
-}
-
 // Describe returns the description of a buildConfig
 func (d *BuildConfigDescriber) Describe(namespace, name string) (string, error) {
 	c := d.BuildConfigs(namespace)
@@ -343,7 +327,7 @@ func (d *BuildConfigDescriber) Describe(namespace, name string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	builds, err := d.Builds(namespace).List(labels.SelectorFromSet(labels.Set{buildapi.BuildConfigLabel: name}), fields.Everything())
+	buildList, err := d.Builds(namespace).List(labels.SelectorFromSet(labels.Set{buildapi.BuildConfigLabel: name}), fields.Everything())
 	if err != nil {
 		return "", err
 	}
@@ -357,15 +341,15 @@ func (d *BuildConfigDescriber) Describe(namespace, name string) (string, error) 
 		}
 		describeBuildSpec(buildConfig.Spec.BuildSpec, out)
 		d.DescribeTriggers(buildConfig, out)
-		if len(builds.Items) == 0 {
+		if len(buildList.Items) == 0 {
 			return nil
 		}
 		fmt.Fprintf(out, "Builds:\n  Name\tStatus\tDuration\tCreation Time\n")
-		sortedBuilds := sortableBuilds(builds.Items)
-		sort.Sort(sortedBuilds)
-		for i := range sortedBuilds {
-			// iterate backwards so we're printing the newest items first
-			build := sortedBuilds[len(sortedBuilds)-1-i]
+
+		builds := buildList.Items
+		sort.Sort(sort.Reverse(buildapi.BuildSliceByCreationTimestamp(builds)))
+
+		for i, build := range builds {
 			fmt.Fprintf(out, "  %s \t%s \t%v \t%v\n",
 				build.Name,
 				strings.ToLower(string(build.Status.Phase)),
@@ -689,6 +673,7 @@ func (d *TemplateDescriber) DescribeParameters(params []templateapi.Parameter, o
 	for _, p := range params {
 		formatString(out, indent+"Name", p.Name)
 		formatString(out, indent+"Description", p.Description)
+		formatString(out, indent+"Required", p.Required)
 		if len(p.Generate) == 0 {
 			formatString(out, indent+"Value", p.Value)
 			continue

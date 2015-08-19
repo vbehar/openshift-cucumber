@@ -8,9 +8,9 @@ import (
 	"github.com/openshift/origin/pkg/cmd/cli/cmd"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 
-	kclientcmd "github.com/GoogleCloudPlatform/kubernetes/pkg/client/clientcmd"
-	kclientcmdapi "github.com/GoogleCloudPlatform/kubernetes/pkg/client/clientcmd/api"
-	kcmdconfig "github.com/GoogleCloudPlatform/kubernetes/pkg/kubectl/cmd/config"
+	kclientcmd "k8s.io/kubernetes/pkg/client/clientcmd"
+	kclientcmdapi "k8s.io/kubernetes/pkg/client/clientcmd/api"
+	kcmdconfig "k8s.io/kubernetes/pkg/kubectl/cmd/config"
 
 	"github.com/lsegal/gucumber"
 	"github.com/stretchr/testify/assert"

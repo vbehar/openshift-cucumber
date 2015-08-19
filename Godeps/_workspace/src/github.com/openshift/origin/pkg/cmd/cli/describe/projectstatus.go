@@ -7,13 +7,13 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	kapierrors "github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
-	kclient "github.com/GoogleCloudPlatform/kubernetes/pkg/client"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/fields"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
-	utilerrors "github.com/GoogleCloudPlatform/kubernetes/pkg/util/errors"
+	kapi "k8s.io/kubernetes/pkg/api"
+	kapierrors "k8s.io/kubernetes/pkg/api/errors"
+	kclient "k8s.io/kubernetes/pkg/client"
+	"k8s.io/kubernetes/pkg/fields"
+	"k8s.io/kubernetes/pkg/labels"
+	"k8s.io/kubernetes/pkg/util"
+	utilerrors "k8s.io/kubernetes/pkg/util/errors"
 
 	osgraph "github.com/openshift/origin/pkg/api/graph"
 	"github.com/openshift/origin/pkg/api/graph/graphview"
@@ -53,6 +53,8 @@ func (d *ProjectStatusDescriber) MakeGraph(namespace string) (osgraph.Graph, uti
 		&secretLoader{namespace: namespace, lister: d.K},
 		&rcLoader{namespace: namespace, lister: d.K},
 		&podLoader{namespace: namespace, lister: d.K},
+		// TODO check swagger for feature enablement and selectively add bcLoader and buildLoader
+		// then remove tolerateNotFoundErrors method.
 		&bcLoader{namespace: namespace, lister: d.C},
 		&buildLoader{namespace: namespace, lister: d.C},
 		&isLoader{namespace: namespace, lister: d.C},
@@ -177,14 +179,16 @@ func (d *ProjectStatusDescriber) Describe(namespace, name string) (string, error
 			printLines(out, indent, 0, describeRCInServiceGroup(standaloneRC.RC)...)
 		}
 
-		// always output warnings
-		fmt.Fprintln(out)
-
 		allMarkers := osgraph.Markers{}
 		allMarkers = append(allMarkers, createForbiddenMarkers(forbiddenResources)...)
 		for _, scanner := range getMarkerScanners() {
 			allMarkers = append(allMarkers, scanner(g)...)
 		}
+
+		if len(allMarkers) > 0 {
+			fmt.Fprintln(out)
+		}
+
 		sort.Stable(osgraph.ByKey(allMarkers))
 		sort.Stable(osgraph.ByNodeID(allMarkers))
 		if errorMarkers := allMarkers.BySeverity(osgraph.ErrorSeverity); len(errorMarkers) > 0 {
@@ -199,6 +203,8 @@ func (d *ProjectStatusDescriber) Describe(namespace, name string) (string, error
 				fmt.Fprintln(out, indent+marker.Message)
 			}
 		}
+
+		fmt.Fprintln(out)
 
 		if (len(services) == 0) && (len(standaloneDCs) == 0) && (len(standaloneImages) == 0) {
 			fmt.Fprintln(out, "You have no services, deployment configs, or build configs.")
@@ -868,7 +874,7 @@ type bcLoader struct {
 func (l *bcLoader) Load() error {
 	list, err := l.lister.BuildConfigs(l.namespace).List(labels.Everything(), fields.Everything())
 	if err != nil {
-		return err
+		return tolerateNotFoundErrors(err)
 	}
 
 	l.items = list.Items
@@ -892,7 +898,7 @@ type buildLoader struct {
 func (l *buildLoader) Load() error {
 	list, err := l.lister.Builds(l.namespace).List(labels.Everything(), fields.Everything())
 	if err != nil {
-		return err
+		return tolerateNotFoundErrors(err)
 	}
 
 	l.items = list.Items
@@ -905,4 +911,13 @@ func (l *buildLoader) AddToGraph(g osgraph.Graph) error {
 	}
 
 	return nil
+}
+
+// tolerateNotFoundErrors is tolerant of not found errors in case builds are disabled server
+// side (Atomic).
+func tolerateNotFoundErrors(err error) error {
+	if kapierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
 }

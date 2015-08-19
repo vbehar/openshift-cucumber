@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	kclient "github.com/GoogleCloudPlatform/kubernetes/pkg/client"
-	kclientcmdapi "github.com/GoogleCloudPlatform/kubernetes/pkg/client/clientcmd/api"
-	kcmdconfig "github.com/GoogleCloudPlatform/kubernetes/pkg/kubectl/cmd/config"
-	kcmdutil "github.com/GoogleCloudPlatform/kubernetes/pkg/kubectl/cmd/util"
+	kclient "k8s.io/kubernetes/pkg/client"
+	kclientcmdapi "k8s.io/kubernetes/pkg/client/clientcmd/api"
+	kcmdconfig "k8s.io/kubernetes/pkg/kubectl/cmd/config"
+	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
 	"github.com/openshift/origin/pkg/client"
 	"github.com/openshift/origin/pkg/cmd/cli/config"
@@ -136,7 +136,7 @@ func (o LogoutOptions) RunLogout() error {
 		}
 	}
 
-	if err := kcmdconfig.ModifyConfig(o.PathOptions, newConfig); err != nil {
+	if err := kcmdconfig.ModifyConfig(o.PathOptions, newConfig, true); err != nil {
 		return err
 	}
 

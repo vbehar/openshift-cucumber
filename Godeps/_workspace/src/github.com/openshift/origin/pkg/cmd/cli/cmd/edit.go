@@ -8,12 +8,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/errors"
-	kclient "github.com/GoogleCloudPlatform/kubernetes/pkg/client"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/kubectl"
-	cmdutil "github.com/GoogleCloudPlatform/kubernetes/pkg/kubectl/cmd/util"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/kubectl/resource"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
+	"k8s.io/kubernetes/pkg/api/errors"
+	kclient "k8s.io/kubernetes/pkg/client"
+	"k8s.io/kubernetes/pkg/kubectl"
+	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
+	"k8s.io/kubernetes/pkg/kubectl/resource"
+	"k8s.io/kubernetes/pkg/util"
 
 	"github.com/golang/glog"
 	"github.com/spf13/cobra"
@@ -59,7 +59,7 @@ saved copy to include the latest resource version.`
 
 // NewCmdEdit implements the OpenShift cli edit command
 func NewCmdEdit(fullName string, f *clientcmd.Factory, out io.Writer) *cobra.Command {
-	var filenames util.StringList
+	filenames := []string{}
 	cmd := &cobra.Command{
 		Use:     "edit (RESOURCE/NAME | -f FILENAME)",
 		Short:   "Edit a resource on the server",
@@ -74,7 +74,7 @@ func NewCmdEdit(fullName string, f *clientcmd.Factory, out io.Writer) *cobra.Com
 		},
 	}
 	usage := "Filename, directory, or URL to file to use to edit the resource"
-	kubectl.AddJsonFilenameFlag(cmd, &filenames, usage)
+	kubectl.AddBoundJsonFilenameFlag(cmd, &filenames, usage)
 	cmd.Flags().StringP("output", "o", "yaml", "Output format. One of: yaml|json.")
 	cmd.Flags().String("output-version", "", "Output the formatted object with the given version (default api-version).")
 	return cmd
@@ -254,7 +254,6 @@ func RunEdit(fullName string, f *clientcmd.Factory, out io.Writer, cmd *cobra.Co
 		// loop again and edit the remaining items
 		infos = results.edit
 	}
-	return nil
 }
 
 // editReason preserves a message about the reason this file must be edited again

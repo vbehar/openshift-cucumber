@@ -7,7 +7,7 @@ import (
 
 	buildapi "github.com/openshift/origin/pkg/build/api"
 
-	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
+	kapi "k8s.io/kubernetes/pkg/api"
 
 	"github.com/stretchr/testify/assert"
 )

@@ -3,8 +3,8 @@ package steps
 import (
 	"os"
 
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/validation"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/kubectl/resource"
+	"k8s.io/kubernetes/pkg/api/validation"
+	"k8s.io/kubernetes/pkg/kubectl/resource"
 )
 
 // registers all resource related steps

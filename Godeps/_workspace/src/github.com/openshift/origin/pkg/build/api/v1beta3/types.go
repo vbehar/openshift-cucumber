@@ -3,8 +3,8 @@ package v1beta3
 import (
 	"time"
 
-	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api/v1beta3"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
+	kapi "k8s.io/kubernetes/pkg/api/v1beta3"
+	"k8s.io/kubernetes/pkg/util"
 )
 
 // Build encapsulates the inputs needed to produce a new deployable image, as well as
@@ -368,6 +368,10 @@ const (
 	// ImageChangeBuildTriggerType represents a trigger that launches builds on
 	// availability of a new version of an image
 	ImageChangeBuildTriggerType BuildTriggerType = "imageChange"
+
+	// ConfigChangeBuildTriggerType will trigger a build on an initial build config creation
+	// WARNING: In the future the behavior will change to trigger a build on any config change
+	ConfigChangeBuildTriggerType BuildTriggerType = "ConfigChange"
 )
 
 // BuildList is a collection of Builds.
@@ -418,6 +422,11 @@ type BuildRequest struct {
 
 	// From is the reference to the ImageStreamTag that triggered the build.
 	From *kapi.ObjectReference `json:"from,omitempty" description:"ImageStreamTag that triggered this build"`
+
+	// LastVersion (optional) is the LastVersion of the BuildConfig that was used
+	// to generate the build. If the BuildConfig in the generator doesn't match, a build will
+	// not be generated.
+	LastVersion *int `json:"lastVersion,omitempty" description:"LastVersion of the BuildConfig that triggered this build"`
 }
 
 // BuildLogOptions is the REST options for a build log

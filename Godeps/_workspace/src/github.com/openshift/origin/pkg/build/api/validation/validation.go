@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"net/url"
 
-	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/api/validation"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/util/fielderrors"
+	kapi "k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/validation"
+	"k8s.io/kubernetes/pkg/util"
+	"k8s.io/kubernetes/pkg/util/fielderrors"
 
 	oapi "github.com/openshift/origin/pkg/api"
 	buildapi "github.com/openshift/origin/pkg/build/api"
@@ -347,6 +347,8 @@ func validateTrigger(trigger *buildapi.BuildTriggerPolicy) fielderrors.Validatio
 			break
 		}
 		allErrs = append(allErrs, validateFromImageReference(trigger.ImageChange.From).Prefix("from")...)
+	case buildapi.ConfigChangeBuildTriggerType:
+		// doesn't reuqire additional validation
 	default:
 		allErrs = append(allErrs, fielderrors.NewFieldInvalid("type", trigger.Type, "invalid trigger type"))
 	}

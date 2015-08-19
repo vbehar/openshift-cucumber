@@ -5,8 +5,8 @@ import (
 
 	projectapi "github.com/openshift/origin/pkg/project/api"
 
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/fields"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/labels"
+	"k8s.io/kubernetes/pkg/fields"
+	"k8s.io/kubernetes/pkg/labels"
 )
 
 // registers all project related steps

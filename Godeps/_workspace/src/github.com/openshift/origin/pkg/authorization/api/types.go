@@ -1,9 +1,9 @@
 package api
 
 import (
-	kapi "github.com/GoogleCloudPlatform/kubernetes/pkg/api"
-	kruntime "github.com/GoogleCloudPlatform/kubernetes/pkg/runtime"
-	"github.com/GoogleCloudPlatform/kubernetes/pkg/util"
+	kapi "k8s.io/kubernetes/pkg/api"
+	kruntime "k8s.io/kubernetes/pkg/runtime"
+	"k8s.io/kubernetes/pkg/util"
 )
 
 // Authorization is calculated against
@@ -67,7 +67,7 @@ var (
 		BuildGroupName:              {"builds", "buildconfigs", "buildlogs", "buildconfigs/instantiate", "builds/log", "builds/clone", "buildconfigs/webhooks"},
 		ImageGroupName:              {"imagestreams", "imagestreammappings", "imagestreamtags", "imagestreamimages"},
 		DeploymentGroupName:         {"deployments", "deploymentconfigs", "generatedeploymentconfigs", "deploymentconfigrollbacks"},
-		SDNGroupName:                {"clusternetworks", "hostsubnets"},
+		SDNGroupName:                {"clusternetworks", "hostsubnets", "netnamespaces"},
 		TemplateGroupName:           {"templates", "templateconfigs", "processedtemplates"},
 		UserGroupName:               {"identities", "users", "useridentitymappings", "groups"},
 		OAuthGroupName:              {"oauthauthorizetokens", "oauthaccesstokens", "oauthclients", "oauthclientauthorizations"},
