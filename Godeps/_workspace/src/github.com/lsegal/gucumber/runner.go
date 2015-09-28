@@ -293,7 +293,8 @@ func (c *Runner) runScenario(title string, f *gherkin.Feature, s *gherkin.Scenar
 			done := make(chan bool)
 			go func() {
 				defer func() {
-					c.Results = append(c.Results, RunnerResult{t, f, s})
+					sc := *s
+					c.Results = append(c.Results, RunnerResult{t, f, &sc})
 
 					if t.Skipped() {
 						c.SkipCount++
@@ -386,6 +387,10 @@ type TestError struct {
 	stack   []byte
 }
 
+func (t *TestError) String() string {
+	return t.message
+}
+
 func (t *TestingT) Errorf(format string, args ...interface{}) {
 	var buf bytes.Buffer
 
@@ -412,6 +417,10 @@ func (t *TestingT) Skipped() bool {
 
 func (t *TestingT) Failed() bool {
 	return len(t.errors) > 0
+}
+
+func (t *TestingT) Errors() []TestError {
+	return t.errors
 }
 
 func (t *TestingT) Error(err error) {

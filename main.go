@@ -2,10 +2,13 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
+	"github.com/vbehar/openshift-cucumber/reporter"
 	"github.com/vbehar/openshift-cucumber/steps"
 
 	"github.com/lsegal/gucumber"
@@ -20,6 +23,8 @@ var (
 func main() {
 	flags := pflag.NewFlagSet("openshift-cucumber", pflag.ExitOnError)
 	printVersion := flags.BoolP("version", "v", false, "print version")
+	reporterName := flags.StringP("reporter", "r", "", "reporter (junit)")
+	outputFile := flags.StringP("output", "o", "", "output file")
 	flags.Parse(os.Args[1:])
 
 	if *printVersion {
@@ -43,11 +48,33 @@ Usage:
 		os.Exit(1)
 	}
 
-	c := steps.NewContext(&gucumber.GlobalContext)
-
+	features := []string{}
 	for _, dir := range os.Args[1:] {
-		log.Printf("Running openshift-cucumber on directory %s ...\n", dir)
-		c.RunDir(dir)
+		firstLevelFiles, _ := filepath.Glob(filepath.Join(dir, "*.feature"))
+		subLevelsFiles, _ := filepath.Glob(filepath.Join(dir, "**", "*.feature"))
+
+		features = append(features, firstLevelFiles...)
+		features = append(features, subLevelsFiles...)
+	}
+
+	c := steps.NewContext(&gucumber.GlobalContext)
+	runner, err := c.RunFiles(features)
+	if err != nil {
+		log.Fatalf("Got error %v\n", err)
+	}
+
+	if *reporterName == "junit" {
+		junit := &reporter.JunitReporter{}
+		f, err := os.Create(*outputFile)
+		if err != nil {
+			log.Fatalf("Failed to create output file %s: %v", *outputFile, err)
+		}
+		defer f.Close()
+
+		w := bufio.NewWriter(f)
+		if err = junit.GenerateReport(runner.Results, w); err != nil {
+			log.Fatalf("Failed to generate JUnit Report to %s: %v", *outputFile, err)
+		}
 	}
 
 }
