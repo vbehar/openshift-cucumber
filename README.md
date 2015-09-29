@@ -63,13 +63,25 @@ $ export OPENSHIFT_PASSWD="demo"
 $ openshift-cucumber examples
 ```
 
+### Output / Reporting
+
+By default, `openshift-cucumber` print each step and its result (either success in green, or failure in red) in the standard output.
+
+You can also configure a **reporter**:
+
+* **JUnit**: the [JUnit](http://junit.org/) reporter can write the results in a [JUnit XML](http://windyroad.com.au/dl/Open%20Source/JUnit.xsd) formatted file, so that it can be used by [Jenkins](http://jenkins-ci.org/) to display a nice UI on top of it.
+
+  You need to configure the `--reporter` and `--output` options:
+
+  ```
+  openshift-cucumber --reporter="junit" --output="/path/to/results.xml" /path/to/feature-files
+  ```
+
 ## Install
 
-Pre-build binaries for the main platforms are available in [bintray](https://bintray.com/vbehar/openshift-cucumber/openshift-cucumber/_latestVersion#files):
+Pre-build binaries for the main platforms (`darwin-amd64`, `linux-amd64` and `windows-amd64`) are available in [bintray](https://bintray.com/vbehar/openshift-cucumber/openshift-cucumber/_latestVersion#files):
 
-* [darwin-amd64](https://dl.bintray.com/vbehar/openshift-cucumber/darwin-amd64/) (Mac OSX)
-* [linux-amd64](https://dl.bintray.com/vbehar/openshift-cucumber/linux-amd64/)
-* [windows-amd64](https://dl.bintray.com/vbehar/openshift-cucumber/windows-amd64/)
+ <https://bintray.com/vbehar/openshift-cucumber/openshift-cucumber/_latestVersion#files>
 
 ## Building from sources
 
