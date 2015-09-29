@@ -7,6 +7,7 @@ import (
 	"io"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/jstemmer/go-junit-report/parser"
 
@@ -27,16 +28,19 @@ func (jr *JunitReporter) GenerateReport(results []gucumber.RunnerResult, w io.Wr
 			// same feature => re-use the previous package
 			// (1 feature <=> 1 package)
 			pkg = jr.Packages[len(jr.Packages)-1]
+			pkg.Time += convertDurationToMillis(res.ElapsedTime)
 
 			if results[i-1].Scenario.Line == res.Scenario.Line {
 				// same scenario => skip to the next result
 				// (1 scenario <=> 1 test)
+				pkg.Tests[len(pkg.Tests)-1].Time += convertDurationToMillis(res.ElapsedTime)
 				continue
 			}
 		} else {
 			// new feature => create a new package
 			pkg = &parser.Package{
 				Name: res.Feature.Title,
+				Time: convertDurationToMillis(res.ElapsedTime),
 			}
 			jr.Packages = append(jr.Packages, pkg)
 		}
@@ -44,6 +48,7 @@ func (jr *JunitReporter) GenerateReport(results []gucumber.RunnerResult, w io.Wr
 		// new test (for the scenario)
 		test := &parser.Test{
 			Name: res.Scenario.Title,
+			Time: convertDurationToMillis(res.ElapsedTime),
 		}
 		switch {
 		case res.Failed():
@@ -67,6 +72,11 @@ func (jr *JunitReporter) GenerateReport(results []gucumber.RunnerResult, w io.Wr
 	}
 
 	return JUnitReportXML(report, false, w)
+}
+
+func convertDurationToMillis(duration time.Duration) int {
+	millis := duration / time.Millisecond
+	return int(millis)
 }
 
 // the following code has been copy-pasted from

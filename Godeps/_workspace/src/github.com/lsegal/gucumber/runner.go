@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/lsegal/gucumber/gherkin"
 	"github.com/shiena/ansicolor"
@@ -46,6 +47,7 @@ type RunnerResult struct {
 	*TestingT
 	*gherkin.Feature
 	*gherkin.Scenario
+	ElapsedTime time.Duration
 }
 
 func (c *Context) RunDir(dir string) (*Runner, error) {
@@ -292,9 +294,12 @@ func (c *Runner) runScenario(title string, f *gherkin.Feature, s *gherkin.Scenar
 		if !skipping && !t.Failed() {
 			done := make(chan bool)
 			go func() {
+				startTime := time.Now()
+
 				defer func() {
+					elapsedTime := time.Since(startTime)
 					sc := *s
-					c.Results = append(c.Results, RunnerResult{t, f, &sc})
+					c.Results = append(c.Results, RunnerResult{t, f, &sc, elapsedTime})
 
 					if t.Skipped() {
 						c.SkipCount++
