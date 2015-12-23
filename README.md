@@ -33,7 +33,7 @@ You can find more complete examples in the [examples](https://github.com/vbehar/
 
 With it, you can write complete tests for your application deployment on OpenShift:
 
-- login
+- login (or token validation)
 - project creation
 - credentials setup (secrets and serviceaccounts)
 - templates creation
@@ -51,8 +51,9 @@ Write [Cucumber feature](https://github.com/cucumber/cucumber/wiki/Feature-Intro
 Note that `openshift-cucumber` relies on environment variables to login:
 
 * `OPENSHIFT_HOST`: the OpenShift server (for example: `https://localhost:8443`)
-* `OPENSHIFT_USER`: the username
+* `OPENSHIFT_USER`: the username (if you want to perform a login - in this case you also need to provide a password)
 * `OPENSHIFT_PASSWD`: the password
+* `OPENSHIFT_TOKEN`: the token (if you just want to validate a ServiceAccount token - in this case, you don't need the user or password)
 
 If you want to run the provided examples againt a local instance of OpenShift:
 

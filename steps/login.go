@@ -8,6 +8,7 @@ import (
 	"github.com/openshift/origin/pkg/cmd/cli/cmd"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 
+	kclient "k8s.io/kubernetes/pkg/client"
 	kclientcmd "k8s.io/kubernetes/pkg/client/clientcmd"
 	kclientcmdapi "k8s.io/kubernetes/pkg/client/clientcmd/api"
 	kcmdconfig "k8s.io/kubernetes/pkg/kubectl/cmd/config"
@@ -39,6 +40,15 @@ func init() {
 			loginOptions.Password = expandedPassword
 		})
 
+		c.And(`^I have a token "(.+?)"$`, func(token string) {
+			expandedToken := os.ExpandEnv(token)
+			if len(expandedToken) == 0 {
+				c.Fail("Token '%s' (expanded to '%s') is empty !", token, expandedToken)
+				return
+			}
+			loginOptions.Token = expandedToken
+		})
+
 		c.When(`^I login on "(.+?)"$`, func(host string) {
 			expandedHost := os.ExpandEnv(host)
 			if len(expandedHost) == 0 {
@@ -47,12 +57,23 @@ func init() {
 			}
 			loginOptions.Server = expandedHost
 
-			factory, err := Login(loginOptions.Server, loginOptions.Username, loginOptions.Password)
-			if err != nil {
-				c.Fail("Failed to login: %v", err)
-				return
+			var config *kclient.Config
+			var err error
+			if len(loginOptions.Token) > 0 {
+				config, err = ValidateToken(loginOptions.Server, loginOptions.Token)
+				if err != nil {
+					c.Fail("Failed to validate token: %v", err)
+					return
+				}
+			} else {
+				config, err = Login(loginOptions.Server, loginOptions.Username, loginOptions.Password)
+				if err != nil {
+					c.Fail("Failed to login: %v", err)
+					return
+				}
 			}
 
+			factory := NewFactory(config)
 			c.setFactory(factory)
 		})
 
@@ -101,8 +122,8 @@ func init() {
 
 // Login uses the given server/username/password to login on an openshift instance
 //
-// It returns an openshift client factory if successful, or an error
-func Login(server string, username string, password string) (*clientcmd.Factory, error) {
+// It returns a client config if successful, or an error
+func Login(server string, username string, password string) (*kclient.Config, error) {
 	opts := &cmd.LoginOptions{
 		Server:             server,
 		Username:           username,
@@ -119,22 +140,49 @@ func Login(server string, username string, password string) (*clientcmd.Factory,
 		return nil, err
 	}
 
+	return opts.Config, nil
+}
+
+// ValidateToken validates that the given token is valid on the given server
+//
+// It returns a client config if successful, or an error
+func ValidateToken(server string, token string) (*kclient.Config, error) {
+	opts := &cmd.LoginOptions{
+		Server:             server,
+		Token:              token,
+		InsecureTLS:        true,
+		APIVersion:         api.Version,
+		StartingKubeConfig: kclientcmdapi.NewConfig(),
+		PathOptions:        kcmdconfig.NewDefaultPathOptions(),
+		Out:                ioutil.Discard,
+	}
+
+	// check the token
+	if err := opts.GatherInfo(); err != nil {
+		return nil, err
+	}
+
+	return opts.Config, nil
+}
+
+// NewFactory builds a new openshift client factory from the given config
+func NewFactory(config *kclient.Config) *clientcmd.Factory {
 	// keep only what we need to initialize a factory
-	config := kclientcmd.NewDefaultClientConfig(
+	clientConfig := kclientcmd.NewDefaultClientConfig(
 		*kclientcmdapi.NewConfig(),
 		&kclientcmd.ConfigOverrides{
 			ClusterInfo: kclientcmdapi.Cluster{
-				Server:                opts.Config.Host,
-				APIVersion:            opts.Config.Version,
-				InsecureSkipTLSVerify: opts.Config.Insecure,
+				Server:                config.Host,
+				APIVersion:            config.Version,
+				InsecureSkipTLSVerify: config.Insecure,
 			},
 			AuthInfo: kclientcmdapi.AuthInfo{
-				Token: opts.Config.BearerToken,
+				Token: config.BearerToken,
 			},
 			Context: kclientcmdapi.Context{},
 		})
 
-	factory := clientcmd.NewFactory(config)
+	factory := clientcmd.NewFactory(clientConfig)
 
-	return factory, nil
+	return factory
 }
