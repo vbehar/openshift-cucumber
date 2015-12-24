@@ -45,6 +45,35 @@ func init() {
 			resp.Body.Close()
 		})
 
+		c.Then(`^I can access the application with the credentials "(.+?)":"(.+?)" through the route "(.+?)"$`, func(login string, password string, routeName string) {
+			route, err := c.GetRoute(routeName)
+			if err != nil {
+				c.Fail("Failed to get Route '%s': %v", routeName, err)
+				return
+			}
+			if len(route.Host) == 0 {
+				c.Fail("The Route '%s' has no host !", routeName)
+				return
+			}
+
+			host := fmt.Sprintf("http://%s/", route.Host)
+			client := &http.Client{}
+			req, err := http.NewRequest("GET", host, nil)
+			if err != nil {
+				c.Fail("Failed to create request for URL %s: %v", host, err)
+				return
+			}
+			req.SetBasicAuth(login, password)
+			resp, err := client.Do(req)
+			if err != nil {
+				c.Fail("Failed to access the route '%s' at %s: %v", routeName, host, err)
+				return
+			}
+
+			assert.True(c.T, resp.StatusCode >= 200 && resp.StatusCode < 400, "Status code should be either 2xx or 3xx, but it is %d", resp.StatusCode)
+			resp.Body.Close()
+		})
+
 	})
 }
 
