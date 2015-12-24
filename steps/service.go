@@ -1,6 +1,8 @@
 package steps
 
 import (
+	"os"
+
 	kapi "k8s.io/kubernetes/pkg/api"
 
 	"github.com/stretchr/testify/assert"
@@ -11,13 +13,19 @@ func init() {
 	RegisterSteps(func(c *Context) {
 
 		c.Then(`^I should have a service "(.+?)"$`, func(serviceName string) {
-			service, err := c.GetService(serviceName)
-			if err != nil {
-				c.Fail("Failed to get Service '%s': %v", serviceName, err)
+			expandedServiceName := os.ExpandEnv(serviceName)
+			if len(expandedServiceName) == 0 {
+				c.Fail("Service name '%s' (expanded to '%s') is empty !", serviceName, expandedServiceName)
 				return
 			}
 
-			assert.Equal(c.T, serviceName, service.Name)
+			service, err := c.GetService(expandedServiceName)
+			if err != nil {
+				c.Fail("Failed to get Service '%s': %v", expandedServiceName, err)
+				return
+			}
+
+			assert.Equal(c.T, expandedServiceName, service.Name)
 		})
 
 	})
