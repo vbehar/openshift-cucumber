@@ -68,13 +68,15 @@ Usage:
 		f, err := os.Create(*outputFile)
 		if err != nil {
 			log.Fatalf("Failed to create output file %s: %v", *outputFile, err)
-		}
-		defer f.Close()
+		} else {
+			defer f.Close()
 
-		w := bufio.NewWriter(f)
-		if err = junit.GenerateReport(runner.Results, w); err != nil {
-			log.Fatalf("Failed to generate JUnit Report to %s: %v", *outputFile, err)
+			w := bufio.NewWriter(f)
+			if err = junit.GenerateReport(runner.Results, w); err != nil {
+				log.Fatalf("Failed to generate JUnit Report to %s: %v", *outputFile, err)
+			}
 		}
+
 	}
 
 }
