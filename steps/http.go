@@ -2,6 +2,7 @@ package steps
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
 
 	"github.com/stretchr/testify/assert"
@@ -26,6 +27,25 @@ func init() {
 			}
 
 			assert.Equal(c.T, expectedResponseCode, resp.StatusCode)
+			resp.Body.Close()
+		})
+
+		c.Then(`^I should have the text "(.+?)" on path "(.+?)" through the tunnel "(.+?)"$`, func(expectedContentText string, path string, tunnelName string) {
+			tunnel := c.GetTunnel(tunnelName)
+			if tunnel == nil {
+				c.Fail("Could not find a tunnel named '%s'", tunnelName)
+				return
+			}
+
+			url := fmt.Sprintf("http://%s:%v%s", "localhost", tunnel.LocalPort, path)
+			resp, err := execHttpGetRequest(url)
+			if err != nil {
+				c.Fail("HTTP request on %s failed: %v", url, err)
+				return
+			}
+			data, err := ioutil.ReadAll(resp.Body)
+
+			assert.Contains(c.T, string(data), expectedContentText)
 			resp.Body.Close()
 		})
 
