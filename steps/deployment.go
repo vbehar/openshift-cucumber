@@ -10,6 +10,7 @@ import (
 	deployutil "github.com/openshift/origin/pkg/deploy/util"
 
 	kapi "k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
 
 	"github.com/stretchr/testify/assert"
@@ -18,6 +19,19 @@ import (
 // registers all deployment related steps
 func init() {
 	RegisterSteps(func(c *Context) {
+
+		c.Then(`^I should not have a deploymentconfig "(.+?)"$`, func(dcName string) {
+			found, err := c.DeploymentConfigExists(dcName)
+			if err != nil {
+				c.Fail("Failed to check for Deployment Config '%s' existance: %v", dcName, err)
+				return
+			}
+
+			if found {
+				c.Fail("Deployment Config %s should not exists", dcName)
+				return
+			}
+		})
 
 		c.Then(`^I should have a deploymentconfig "(.+?)"$`, func(dcName string) {
 			dc, err := c.GetDeploymentConfig(dcName)
@@ -102,7 +116,38 @@ func init() {
 			}
 		})
 
+		c.When(`^I delete the deploymentconfig "(.+?)"$`, func(dcName string) {
+			if err := c.DeleteDeploymentConfig(dcName); err != nil {
+				c.Fail("Failed to delete deployment config %s", dcName)
+			}
+		})
+
 	})
+}
+
+// DeploymentConfigExists checks if a DeploymentConfig with the given name exists.
+func (c *Context) DeploymentConfigExists(dcName string) (bool, error) {
+	client, _, err := c.Clients()
+	if err != nil {
+		return false, err
+	}
+
+	namespace, err := c.Namespace()
+	if err != nil {
+		return false, err
+	}
+
+	dcList, err := client.DeploymentConfigs(namespace).List(labels.Everything(), fields.Everything())
+	if err != nil {
+		return false, err
+	}
+
+	for _, dc := range dcList.Items {
+		if dc.Name == dcName {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // GetDeploymentConfig gets the DeploymentConfig with the given name, or returns an error
@@ -143,6 +188,25 @@ func (c *Context) GetReplicationControllers(labelSelector labels.Selector) (*kap
 	}
 
 	return rcList, nil
+}
+
+// DeleteDeploymentConfig deletes the DeploymentConfig with the given name, or returns an error
+func (c *Context) DeleteDeploymentConfig(dcName string) error {
+	client, _, err := c.Clients()
+	if err != nil {
+		return err
+	}
+
+	namespace, err := c.Namespace()
+	if err != nil {
+		return err
+	}
+
+	if err = client.DeploymentConfigs(namespace).Delete(dcName); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // IsDeploymentComplete checks if the deployment with the given name is complete.
