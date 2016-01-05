@@ -29,6 +29,29 @@ func init() {
 			}
 		})
 
+		c.When(`^I create resources from the file "(.+?)"$`, func(fileName string) {
+			expandedFileName := os.ExpandEnv(fileName)
+			if expandedFileName == "" {
+				c.Fail("File name '%s' (expanded to '%s') is empty !", fileName, expandedFileName)
+				return
+			}
+			if _, err := os.Stat(expandedFileName); err != nil {
+				c.Fail("File '%s' (expanded to '%s') does not exists: %v", fileName, expandedFileName, err)
+				return
+			}
+
+			r, err := c.ParseResource(expandedFileName)
+			if err != nil {
+				c.Fail("Failed to parse file '%s' (expanded to '%s'): %v", fileName, expandedFileName, err)
+				return
+			}
+
+			if err = r.Visit(CreateResource); err != nil {
+				c.Fail("Failed to create resource from file '%s' (expanded to '%s'): %v", fileName, expandedFileName, err)
+				return
+			}
+		})
+
 	})
 }
 
