@@ -20,6 +20,8 @@ type Context struct {
 
 	factory   *clientcmd.Factory
 	namespace string
+
+	tunnels map[string]Tunnel
 }
 
 // NewContext build a new context based on the given gucumber context
@@ -27,6 +29,7 @@ type Context struct {
 func NewContext(gc *gucumber.Context) *Context {
 	c := &Context{
 		Context: gc,
+		tunnels: make(map[string]Tunnel),
 	}
 
 	// register all steps with this context
@@ -74,6 +77,30 @@ func (c *Context) Clients() (*client.Client, *kclient.Client, error) {
 		return nil, nil, err
 	}
 	return factory.Clients()
+}
+
+// ClientConfig is a shortcut to the client config
+// It returns the k8s client config used by the factory
+// or an error
+func (c *Context) ClientConfig() (*kclient.Config, error) {
+	factory, err := c.Factory()
+	if err != nil {
+		return nil, err
+	}
+	clientConfig, err := factory.OpenShiftClientConfig.ClientConfig()
+	if err != nil {
+		return nil, err
+	}
+	return clientConfig, nil
+}
+
+// GetTunnel returns the tunnel with the given name
+// or nil if no tunnel exists with this name
+func (c *Context) GetTunnel(tunnelName string) *Tunnel {
+	if tunnel, found := c.tunnels[tunnelName]; found {
+		return &tunnel
+	}
+	return nil
 }
 
 // Fail fails the current step

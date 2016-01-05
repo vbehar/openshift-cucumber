@@ -7,10 +7,10 @@ import (
 	"time"
 
 	deployapi "github.com/openshift/origin/pkg/deploy/api"
+	deployutil "github.com/openshift/origin/pkg/deploy/util"
 
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/labels"
-	"k8s.io/kubernetes/pkg/util"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -79,13 +79,7 @@ func init() {
 		})
 
 		c.When(`^I have a successful deployment of "(.+?)"$`, func(dcName string) {
-			dcFilter, err := labels.NewRequirement(deployapi.DeploymentConfigAnnotation, labels.EqualsOperator, util.NewStringSet(dcName))
-			if err != nil {
-				c.Fail("Failed to build a label selector for deployment '%s': %v", dcName, err)
-				return
-			}
-
-			rcList, err := c.GetReplicationControllers(labels.LabelSelector{*dcFilter})
+			rcList, err := c.GetReplicationControllers(deployutil.ConfigSelector(dcName))
 			if err != nil {
 				c.Fail("Failed to get Deployment Config '%s': %v", dcName, err)
 				return
@@ -132,7 +126,7 @@ func (c *Context) GetDeploymentConfig(dcName string) (*deployapi.DeploymentConfi
 }
 
 // GetReplicationControllers gets a ReplicationControllerList from the given label selector, or returns an error
-func (c *Context) GetReplicationControllers(labelSelector labels.LabelSelector) (*kapi.ReplicationControllerList, error) {
+func (c *Context) GetReplicationControllers(labelSelector labels.Selector) (*kapi.ReplicationControllerList, error) {
 	_, kclient, err := c.Clients()
 	if err != nil {
 		return nil, err

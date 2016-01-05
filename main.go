@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/vbehar/openshift-cucumber/reporter"
 	"github.com/vbehar/openshift-cucumber/steps"
+
+	"k8s.io/kubernetes/pkg/util"
 
 	"github.com/lsegal/gucumber"
 	"github.com/spf13/pflag"
@@ -20,11 +23,18 @@ var (
 	buildNumber string
 )
 
+func init() {
+	// disable glog logging to stderr by default
+	// because we don't want port-fowarding info messages in the console output
+	flag.Set("logtostderr", "false")
+}
+
 func main() {
 	flags := pflag.NewFlagSet("openshift-cucumber", pflag.ExitOnError)
 	printVersion := flags.BoolP("version", "v", false, "print version")
 	reporterName := flags.StringP("reporter", "r", "", "reporter (junit)")
 	outputFile := flags.StringP("output", "o", "", "output file")
+	util.AddFlagSetToPFlagSet(flag.CommandLine, flags) // import glog flags
 	flags.Parse(os.Args[1:])
 
 	if *printVersion {
