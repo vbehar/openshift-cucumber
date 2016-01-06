@@ -53,7 +53,11 @@ func init() {
 				return
 			}
 
-			c.OpenTunnel(tunnelName, pod.Name, targetPort)
+			tunnel, err := c.OpenTunnel(tunnelName, pod.Name, targetPort)
+			if err != nil {
+				c.Fail("Failed to open tunnel %s (%v->%v): %v", tunnel.Name, tunnel.LocalPort, targetPort, err)
+				return
+			}
 		})
 
 		c.Then(`^I close the tunnel "(.+?)"$`, func(tunnelName string) {
