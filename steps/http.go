@@ -3,8 +3,11 @@ package steps
 import (
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
+	"time"
 
+	"github.com/cenkalti/backoff"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -54,15 +57,48 @@ func init() {
 
 // execHttpGetRequest executes an HTTP GET request on the given URL
 // and returns the response or an error
+// It uses an exponential backoff retry
 func execHttpGetRequest(url string) (*http.Response, error) {
-	client := &http.Client{}
+	transport := &http.Transport{
+		DisableKeepAlives:     true,
+		MaxIdleConnsPerHost:   5,
+		ResponseHeaderTimeout: 10 * time.Second,
+		Dial: (&net.Dialer{
+			Timeout: 5 * time.Second,
+		}).Dial,
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   5 * time.Second,
+	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
+
+	var resp *http.Response
+	operation := func() error {
+		var err error
+		resp, err = client.Do(req)
+		return err
+	}
+
+	b := backoff.NewExponentialBackOff()
+	b.MaxElapsedTime = 10 * time.Second
+	ticker := backoff.NewTicker(b)
+
+	for range ticker.C {
+		if err = operation(); err != nil {
+			continue
+		}
+
+		ticker.Stop()
+		break
+	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	return resp, nil
 }

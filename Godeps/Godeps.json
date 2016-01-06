@@ -37,6 +37,10 @@
 			"Rev": "b965b613227fddccbfffe13eae360ed3fa822f8d"
 		},
 		{
+			"ImportPath": "github.com/cenkalti/backoff",
+			"Rev": "4dc77674aceaabba2c7e3da25d4c823edfb73f99"
+		},
+		{
 			"ImportPath": "github.com/davecgh/go-spew/spew",
 			"Rev": "3e6e67c4dcea3ac2f25fd4731abc0e1deaf36216"
 		},
@@ -172,7 +176,7 @@
 			"Rev": "cd738dde20f0b3782516181b0866c9bb9db47401"
 		},
 		{
-			"ImportPath": "github.com/jstemmer/go-junit-report",
+			"ImportPath": "github.com/jstemmer/go-junit-report/parser",
 			"Rev": "8faee8c123c701d8032d610243aa0429a788dde8"
 		},
 		{

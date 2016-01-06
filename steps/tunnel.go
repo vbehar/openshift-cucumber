@@ -3,7 +3,6 @@ package steps
 import (
 	"fmt"
 	"net"
-	"time"
 
 	kclientapi "k8s.io/kubernetes/pkg/client"
 	"k8s.io/kubernetes/pkg/client/portforward"
@@ -59,9 +58,6 @@ func (tunnel *Tunnel) StartForwardingToPod(podName string, namespace string, tar
 			fmt.Printf("Failed to forward localPort %v to remotePort %v on pod %s: %v\n", localPort, targetPort, podName, err)
 		}
 	}(tunnel.LocalPort)
-
-	// FIXME wait a little to make sure the port forwarding has been set up
-	time.Sleep(200 * time.Millisecond)
 
 	return nil
 }
