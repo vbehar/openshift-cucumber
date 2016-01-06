@@ -53,9 +53,9 @@ func init() {
 				return
 			}
 
-			tunnel, err := c.OpenTunnel(tunnelName, pod.Name, targetPort)
+			_, err = c.OpenTunnel(tunnelName, pod.Name, targetPort)
 			if err != nil {
-				c.Fail("Failed to open tunnel %s (%v->%v): %v", tunnel.Name, tunnel.LocalPort, targetPort, err)
+				c.Fail("Failed to open tunnel %s: %v", tunnelName, err)
 				return
 			}
 		})
