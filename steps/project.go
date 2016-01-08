@@ -58,9 +58,12 @@ func init() {
 				return
 			}
 
-			if found {
-				c.setNamespace(projectName)
+			if !found {
+				c.Fail("Project '%s' does not exists", projectName)
+				return
 			}
+
+			c.setNamespace(projectName)
 		})
 
 		c.When(`^I create a new project "(.+?)"$`, func(projectName string) {
