@@ -2,12 +2,14 @@ package steps
 
 import (
 	"errors"
+	"time"
 
 	"github.com/openshift/origin/pkg/client"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 
 	kclient "k8s.io/kubernetes/pkg/client"
 
+	"github.com/cenkalti/backoff"
 	"github.com/lsegal/gucumber"
 	"github.com/stretchr/testify/assert"
 )
@@ -22,14 +24,20 @@ type Context struct {
 	namespace string
 
 	tunnels map[string]Tunnel
+
+	backOff *backoff.ExponentialBackOff
 }
 
 // NewContext build a new context based on the given gucumber context
 // It will register all known steps on the gucumber context
 func NewContext(gc *gucumber.Context) *Context {
+	b := backoff.NewExponentialBackOff()
+	b.MaxElapsedTime = 10 * time.Second
+
 	c := &Context{
 		Context: gc,
 		tunnels: make(map[string]Tunnel),
+		backOff: b,
 	}
 
 	// register all steps with this context
@@ -109,4 +117,24 @@ func (c *Context) GetTunnel(tunnelName string) *Tunnel {
 // so it is recommended to return from your step directly after calling this method
 func (c *Context) Fail(msgAndArgs ...interface{}) bool {
 	return assert.Fail(c.T, "", msgAndArgs...)
+}
+
+// ExecWithExponentialBackoff executes an operation with an exponential backoff retry
+// and returns the operation's error
+func (c *Context) ExecWithExponentialBackoff(op backoff.Operation) error {
+	var err error
+
+	c.backOff.Reset()
+	ticker := backoff.NewTicker(c.backOff)
+
+	for range ticker.C {
+		if err = op(); err != nil {
+			continue
+		}
+
+		ticker.Stop()
+		break
+	}
+
+	return err
 }

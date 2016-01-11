@@ -139,7 +139,13 @@ func (c *Context) IsBuildComplete(buildName string, timeout time.Duration) (bool
 
 	// TODO use Watch instead of manually polling
 	for time.Now().Sub(startTime) < timeout {
-		build, err := client.Builds(namespace).Get(buildName)
+		var build *buildapi.Build
+
+		err = c.ExecWithExponentialBackoff(func() error {
+			var err error
+			build, err = client.Builds(namespace).Get(buildName)
+			return err
+		})
 		if err != nil {
 			return false, err
 		}

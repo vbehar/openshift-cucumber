@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cenkalti/backoff"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -23,7 +22,7 @@ func init() {
 			}
 
 			url := fmt.Sprintf("http://%s:%v%s", "localhost", tunnel.LocalPort, path)
-			resp, err := execHttpGetRequest(url)
+			resp, err := c.execHttpGetRequest(url)
 			if err != nil {
 				c.Fail("HTTP request on %s failed: %v", url, err)
 				return
@@ -41,7 +40,7 @@ func init() {
 			}
 
 			url := fmt.Sprintf("http://%s:%v%s", "localhost", tunnel.LocalPort, path)
-			resp, err := execHttpGetRequest(url)
+			resp, err := c.execHttpGetRequest(url)
 			if err != nil {
 				c.Fail("HTTP request on %s failed: %v", url, err)
 				return
@@ -58,7 +57,7 @@ func init() {
 // execHttpGetRequest executes an HTTP GET request on the given URL
 // and returns the response or an error
 // It uses an exponential backoff retry
-func execHttpGetRequest(url string) (*http.Response, error) {
+func (c *Context) execHttpGetRequest(url string) (*http.Response, error) {
 	transport := &http.Transport{
 		DisableKeepAlives:     true,
 		MaxIdleConnsPerHost:   5,
@@ -77,24 +76,11 @@ func execHttpGetRequest(url string) (*http.Response, error) {
 	}
 
 	var resp *http.Response
-	operation := func() error {
+	err = c.ExecWithExponentialBackoff(func() error {
 		var err error
 		resp, err = client.Do(req)
 		return err
-	}
-
-	b := backoff.NewExponentialBackOff()
-	b.MaxElapsedTime = 10 * time.Second
-	ticker := backoff.NewTicker(b)
-
-	for range ticker.C {
-		if err = operation(); err != nil {
-			continue
-		}
-
-		ticker.Stop()
-		break
-	}
+	})
 
 	if err != nil {
 		return nil, err
