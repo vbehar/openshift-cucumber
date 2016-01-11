@@ -21,7 +21,10 @@ func init() {
 			}
 
 			if found {
-				c.DeleteProject(projectName)
+				if err = c.DeleteProject(projectName); err != nil {
+					c.Fail("Failed to delete project '%s': %v", projectName, err)
+					return
+				}
 
 				stillPresent, err := c.ProjectExists(projectName)
 				if err != nil {
@@ -45,7 +48,7 @@ func init() {
 
 			if !found {
 				if err := c.CreateNewProject(projectName); err != nil {
-					c.Fail("Failed to create new project %s", projectName)
+					c.Fail("Failed to create new project %s: %v", projectName, err)
 					return
 				}
 			}
@@ -68,13 +71,13 @@ func init() {
 
 		c.When(`^I create a new project "(.+?)"$`, func(projectName string) {
 			if err := c.CreateNewProject(projectName); err != nil {
-				c.Fail("Failed to create new project %s", projectName)
+				c.Fail("Failed to create new project %s: %v", projectName, err)
 			}
 		})
 
 		c.When(`^I delete the project "(.+?)"$`, func(projectName string) {
 			if err := c.DeleteProject(projectName); err != nil {
-				c.Fail("Failed to delete project %s", projectName)
+				c.Fail("Failed to delete project %s: %v", projectName, err)
 			}
 		})
 
