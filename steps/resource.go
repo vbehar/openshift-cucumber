@@ -2,8 +2,11 @@ package steps
 
 import (
 	"os"
+	"time"
 
+	"k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/validation"
+	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
 )
 
@@ -52,6 +55,59 @@ func init() {
 			}
 		})
 
+		c.When(`^I delete all resources with "(.+?)"$`, func(selector string) {
+			err := c.DeleteResourcesBySelector(selector)
+			if err != nil {
+				c.Fail("Failed to delete resources with '%s': %v", selector, err)
+				return
+			}
+		})
+
+	})
+}
+
+// DeleteResourcesBySelector deletes all resources matching the given label selector
+func (c *Context) DeleteResourcesBySelector(selector string) error {
+	factory, err := c.Factory()
+	if err != nil {
+		return err
+	}
+
+	namespace, err := c.Namespace()
+	if err != nil {
+		return err
+	}
+
+	mapper, typer := factory.Object()
+	clientMapper := factory.ClientMapperForCommand()
+
+	r := resource.
+		NewBuilder(mapper, typer, clientMapper).
+		ContinueOnError().
+		NamespaceParam(namespace).DefaultNamespace().
+		FilenameParam(true).
+		SelectorParam(selector).
+		SelectAllParam(false).
+		ResourceTypeOrNameArgs(false, "template,buildconfig,build,imagestream,deploymentconfig,replicationcontroller,pod,service,route").
+		RequireObject(false).
+		Flatten().
+		Do()
+
+	if err = r.Err(); err != nil {
+		return err
+	}
+
+	return r.Visit(func(info *resource.Info) error {
+		reaper, err := factory.Reaper(info.Mapping)
+		if err != nil {
+			if kubectl.IsNoSuchReaperError(err) {
+				return resource.NewHelper(info.Client, info.Mapping).Delete(info.Namespace, info.Name)
+			}
+			return err
+		}
+
+		_, err = reaper.Stop(info.Namespace, info.Name, 5*time.Second, api.NewDeleteOptions(int64(0)))
+		return err
 	})
 }
 
@@ -77,7 +133,7 @@ func (c *Context) ParseResource(fileName string) (*resource.Result, error) {
 	r := resource.
 		NewBuilder(mapper, typer, clientMapper).
 		Schema(validation.NullSchema{}).
-		NamespaceParam(namespace).DefaultNamespace().
+		NamespaceParam(namespace).DefaultNamespace().RequireNamespace().
 		FilenameParam(true, fileName).
 		Flatten().
 		Do()
