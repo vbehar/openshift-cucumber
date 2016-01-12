@@ -11,6 +11,10 @@ import (
 func init() {
 	RegisterSteps(func(c *Context) {
 
+		c.Then(`The group "(.+?)" should have the "(.+?)" role$`, func(groupName string, roleName string) {
+			c.checkGroupHasRole(groupName, roleName)
+		})
+
 		c.Then(`The user "(.+?)" should have the "(.+?)" role$`, func(userName string, roleName string) {
 			c.checkUserHasRole(userName, roleName)
 		})
@@ -45,6 +49,23 @@ func (c *Context) checkUserHasRole(userName string, roleName string) {
 
 	if !rb.Users.Has(userName) {
 		c.Fail("The user '%s' does not have the '%s' role !", userName, roleName)
+	}
+}
+
+// checkGroupHasRole checks that the given group has the given role
+func (c *Context) checkGroupHasRole(groupName string, roleName string) {
+	rb, err := c.GetRoleBindingForRole(roleName)
+	if err != nil {
+		c.Fail("Failed to get Role Binding for role '%s': %v", roleName, err)
+		return
+	}
+	if rb == nil {
+		c.Fail("Could not find a Role Binding for role '%s'", roleName)
+		return
+	}
+
+	if !rb.Groups.Has(groupName) {
+		c.Fail("The group '%s' does not have the '%s' role !", groupName, roleName)
 	}
 }
 
