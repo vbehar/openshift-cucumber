@@ -3,7 +3,6 @@ package steps
 import (
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	deployapi "github.com/openshift/origin/pkg/deploy/api"
@@ -60,8 +59,9 @@ func init() {
 				return
 			}
 
-			if !(dc.LatestVersion >= requiredDeployments) {
-				log.Printf("DC latest version is %d. TODO => trigger a new deployment", dc.LatestVersion)
+			if dc.LatestVersion < requiredDeployments {
+				c.Fail("The Deployment Config '%s' has only %v deployments, instead of the %v deployments required", dcName, dc.LatestVersion, requiredDeployments)
+				return
 			}
 		})
 
