@@ -226,18 +226,18 @@ func (c *Context) IsDeploymentComplete(deploymentName string, timeout time.Durat
 	}
 
 	startTime := time.Now()
-	var retries int
 
 	// TODO use Watch instead of manually polling
 	for time.Now().Sub(startTime) < timeout {
-		rc, err := kclient.ReplicationControllers(namespace).Get(deploymentName)
+		var rc *kapi.ReplicationController
+
+		err = c.ExecWithExponentialBackoff(func() error {
+			var err error
+			rc, err = kclient.ReplicationControllers(namespace).Get(deploymentName)
+			return err
+		})
 		if err != nil {
-			if retries > 5 {
-				return false, err
-			}
-			retries++
-			time.Sleep(5 * time.Second)
-			continue
+			return false, err
 		}
 
 		if status, ok := rc.Annotations[deployapi.DeploymentStatusAnnotation]; ok {
