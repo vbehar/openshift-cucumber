@@ -1,7 +1,6 @@
 package steps
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -106,7 +105,7 @@ func parseParameters(parameters string) (map[string]string, error) {
 			k, v := matches[1], matches[2]
 			ret[k] = v
 		default:
-			return map[string]string{}, errors.New(fmt.Sprintf("Parameter '%s' should match the format 'key=value'", parameter))
+			return map[string]string{}, fmt.Errorf("Parameter '%s' should match the format 'key=value'", parameter)
 		}
 
 	}

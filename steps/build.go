@@ -1,7 +1,6 @@
 package steps
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -158,7 +157,7 @@ func (c *Context) IsBuildComplete(buildName string, timeout time.Duration) (bool
 		case buildapi.BuildPhaseFailed, buildapi.BuildPhaseError, buildapi.BuildPhaseCancelled:
 			return false, nil
 		default:
-			return false, errors.New(fmt.Sprintf("Unknown phase %v", build.Status.Phase))
+			return false, fmt.Errorf("Unknown phase %v", build.Status.Phase)
 		}
 	}
 

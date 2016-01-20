@@ -1,7 +1,6 @@
 package steps
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -249,7 +248,7 @@ func (c *Context) IsDeploymentComplete(deploymentName string, timeout time.Durat
 			case string(deployapi.DeploymentStatusFailed):
 				return false, nil
 			default:
-				return false, errors.New(fmt.Sprintf("Unknown status %v", status))
+				return false, fmt.Errorf("Unknown status %v", status)
 			}
 		}
 	}
