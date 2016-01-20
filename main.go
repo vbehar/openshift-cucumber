@@ -25,7 +25,7 @@ var (
 
 func init() {
 	// disable glog logging to stderr by default
-	// because we don't want port-fowarding info messages in the console output
+	// because we don't want port-forwarding info messages in the console output
 	flag.Set("logtostderr", "false")
 }
 
