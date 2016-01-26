@@ -97,9 +97,9 @@ func (c *Context) DeleteResourcesBySelector(selector string) error {
 		return err
 	}
 
-	return r.Visit(func(info *resource.Info, e error) error {
-		if e != nil {
-			return e
+	return r.Visit(func(info *resource.Info, err error) error {
+		if err != nil {
+			return err
 		}
 		reaper, err := factory.Reaper(info.Mapping)
 		if err != nil {
@@ -154,9 +154,9 @@ func (c *Context) ParseResource(fileName string) (*resource.Result, error) {
 // Usage: first parse the resource with Context.ParseResource
 // and then use the visitor pattern on the parsed resource:
 //   r.Visit(CreateResource)
-func CreateResource(info *resource.Info, e error) error {
-	if e != nil {
-		return e
+func CreateResource(info *resource.Info, err error) error {
+	if err != nil {
+		return err
 	}
 
 	obj, err := resource.NewHelper(info.Client, info.Mapping).Create(info.Namespace, true, info.Object)
