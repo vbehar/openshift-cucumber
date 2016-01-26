@@ -29,12 +29,12 @@ func init() {
 				c.Fail("Failed to get Route '%s': %v", routeName, err)
 				return
 			}
-			if len(route.Host) == 0 {
+			if len(route.Spec.Host) == 0 {
 				c.Fail("The Route '%s' has no host !", routeName)
 				return
 			}
 
-			host := fmt.Sprintf("http://%s/", route.Host)
+			host := fmt.Sprintf("http://%s/", route.Spec.Host)
 			resp, err := http.Get(host)
 			if err != nil {
 				c.Fail("Failed to access the route '%s' at %s: %v", routeName, host, err)
@@ -51,12 +51,12 @@ func init() {
 				c.Fail("Failed to get Route '%s': %v", routeName, err)
 				return
 			}
-			if len(route.Host) == 0 {
+			if len(route.Spec.Host) == 0 {
 				c.Fail("The Route '%s' has no host !", routeName)
 				return
 			}
 
-			host := fmt.Sprintf("http://%s/", route.Host)
+			host := fmt.Sprintf("http://%s/", route.Spec.Host)
 			client := &http.Client{}
 			req, err := http.NewRequest("GET", host, nil)
 			if err != nil {

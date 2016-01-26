@@ -15,13 +15,12 @@ import (
 	apierrs "k8s.io/kubernetes/pkg/api/errors"
 	"k8s.io/kubernetes/pkg/api/meta"
 	kresource "k8s.io/kubernetes/pkg/api/resource"
-	kclient "k8s.io/kubernetes/pkg/client"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/kubectl"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/runtime"
-	kutil "k8s.io/kubernetes/pkg/util"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 )
@@ -56,31 +55,31 @@ Volume types include:
 
 For descriptions on other volume types, see https://docs.openshift.com`
 
-	volumeExample = `  // List volumes defined on all deployment configs in the current project
+	volumeExample = `  # List volumes defined on all deployment configs in the current project
   $ %[1]s volume dc --all
 
-  // Add a new empty dir volume to deployment config (dc) 'registry' mounted under
-  // /var/lib/registry
+  # Add a new empty dir volume to deployment config (dc) 'registry' mounted under
+  # /var/lib/registry
   $ %[1]s volume dc/registry --add --mount-path=/var/lib/registry
 
-  // Use an existing persistent volume claim (pvc) to overwrite an existing volume 'v1'
+  # Use an existing persistent volume claim (pvc) to overwrite an existing volume 'v1'
   $ %[1]s volume dc/registry --add --name=v1 -t pvc --claim-name=pvc1 --overwrite
 
-  // Remove volume 'v1' from deployment config 'registry'
+  # Remove volume 'v1' from deployment config 'registry'
   $ %[1]s volume dc/registry --remove --name=v1
 
-  // Create a new persistent volume claim that overwrites an existing volume 'v1'
+  # Create a new persistent volume claim that overwrites an existing volume 'v1'
   $ %[1]s volume dc/registry --add --name=v1 -t pvc --claim-size=1G --overwrite
 
-  // Change the mount point for volume 'v1' to /data
+  # Change the mount point for volume 'v1' to /data
   $ %[1]s volume dc/registry --add --name=v1 -m /data --overwrite
 
-  // Modify the deployment config by removing volume mount "v1" from container "c1"
-  // (and by removing the volume "v1" if no other containers have volume mounts that reference it)
+  # Modify the deployment config by removing volume mount "v1" from container "c1"
+  # (and by removing the volume "v1" if no other containers have volume mounts that reference it)
   $ %[1]s volume dc/registry --remove --name=v1 --containers=c1
 
-  // Add new volume based on a more complex volume source (Git repo, AWS EBS, GCE PD,
-  // Ceph, Gluster, NFS, ISCSI, ...)
+  # Add new volume based on a more complex volume source (Git repo, AWS EBS, GCE PD,
+  # Ceph, Gluster, NFS, ISCSI, ...)
   $ %[1]s volume dc/registry --add -m /repo --source=<json-string>`
 
 	volumePrefix = "volume-"
@@ -100,7 +99,7 @@ type VolumeOptions struct {
 	// Resource selection
 	Selector  string
 	All       bool
-	Filenames kutil.StringList
+	Filenames []string
 
 	// Operations
 	Add    bool
@@ -138,10 +137,11 @@ func NewCmdVolume(fullName string, f *clientcmd.Factory, out, errOut io.Writer) 
 	addOpts := &AddVolumeOptions{}
 	opts := &VolumeOptions{AddOpts: addOpts}
 	cmd := &cobra.Command{
-		Use:     "volume RESOURCE/NAME --add|--remove|--list",
+		Use:     "volumes RESOURCE/NAME --add|--remove|--list",
 		Short:   "Update volume on a resource with a pod template",
 		Long:    volumeLong,
 		Example: fmt.Sprintf(volumeExample, fullName),
+		Aliases: []string{"volume"},
 		Run: func(cmd *cobra.Command, args []string) {
 			addOpts.TypeChanged = cmd.Flag("type").Changed
 
@@ -161,8 +161,7 @@ func NewCmdVolume(fullName string, f *clientcmd.Factory, out, errOut io.Writer) 
 	}
 	cmd.Flags().StringVarP(&opts.Selector, "selector", "l", "", "Selector (label query) to filter on")
 	cmd.Flags().BoolVar(&opts.All, "all", false, "select all resources in the namespace of the specified resource types")
-	cmd.Flags().VarP(&opts.Filenames, "filename", "f", "Filename, directory, or URL to file to use to edit the resource.")
-
+	cmd.Flags().StringSliceVarP(&opts.Filenames, "filename", "f", opts.Filenames, "Filename, directory, or URL to file to use to edit the resource.")
 	cmd.Flags().BoolVar(&opts.Add, "add", false, "Add volume and/or volume mounts for containers")
 	cmd.Flags().BoolVar(&opts.Remove, "remove", false, "Remove volume and/or volume mounts for containers")
 	cmd.Flags().BoolVar(&opts.List, "list", false, "List volumes and volume mounts for containers")
@@ -173,7 +172,7 @@ func NewCmdVolume(fullName string, f *clientcmd.Factory, out, errOut io.Writer) 
 	cmd.Flags().StringVarP(&opts.Output, "output", "o", "", "Display the changed objects instead of updating them. One of: json|yaml")
 	cmd.Flags().String("output-version", "", "Output the changed objects with the given version (default api-version).")
 
-	cmd.Flags().StringVarP(&addOpts.Type, "type", "t", "emptyDir", "Type of the volume source for add operation. Supported options: emptyDir, hostPath, secret, persistentVolumeClaim")
+	cmd.Flags().StringVarP(&addOpts.Type, "type", "t", "", "Type of the volume source for add operation. Supported options: emptyDir, hostPath, secret, persistentVolumeClaim")
 	cmd.Flags().StringVarP(&addOpts.MountPath, "mount-path", "m", "", "Mount path inside the container. Optional param for --add or --remove op")
 	cmd.Flags().BoolVar(&addOpts.Overwrite, "overwrite", false, "If true, replace existing volume source and/or volume mount for the given resource")
 	cmd.Flags().StringVar(&addOpts.Path, "path", "", "Host path. Must be provided for hostPath volume type")
@@ -182,6 +181,8 @@ func NewCmdVolume(fullName string, f *clientcmd.Factory, out, errOut io.Writer) 
 	cmd.Flags().StringVar(&addOpts.ClaimSize, "claim-size", "", "If specified along with a persistent volume type, create a new claim with the given size in bytes. Accepts SI notation: 10, 10G, 10Gi")
 	cmd.Flags().StringVar(&addOpts.ClaimMode, "claim-mode", "ReadWriteOnce", "Set the access mode of the claim to be created. Valid values are ReadWriteOnce (rwo), ReadWriteMany (rwm), or ReadOnlyMany (rom)")
 	cmd.Flags().StringVar(&addOpts.Source, "source", "", "Details of volume source as json string. This can be used if the required volume type is not supported by --type option. (e.g.: '{\"gitRepo\": {\"repository\": <git-url>, \"revision\": <commit-hash>}}')")
+
+	cmd.MarkFlagFilename("filename", "yaml", "yml", "json")
 
 	return cmd
 }
@@ -234,14 +235,19 @@ func (v *VolumeOptions) Validate(args []string) error {
 
 func (a *AddVolumeOptions) Validate(isAddOp bool) error {
 	if isAddOp {
+		if len(a.Type) == 0 && (len(a.ClaimName) > 0 || len(a.ClaimSize) > 0) {
+			a.Type = "persistentvolumeclaim"
+			a.TypeChanged = true
+		}
+
+		if len(a.Type) == 0 {
+			a.Type = "emptydir"
+		}
+
 		if len(a.Type) == 0 && len(a.Source) == 0 {
 			return errors.New("must provide --type or --source for --add operation")
 		} else if a.TypeChanged && len(a.Source) > 0 {
 			return errors.New("either specify --type or --source but not both for --add operation")
-		}
-
-		if len(a.Type) == 0 && (len(a.ClaimName) > 0 || len(a.ClaimSize) > 0) {
-			a.Type = "persistentvolumeclaim"
 		}
 
 		if len(a.Type) > 0 {
@@ -433,17 +439,11 @@ func (v *VolumeOptions) RunVolume(args []string) error {
 
 	failed := false
 	for _, info := range updateInfos {
-		data, err := info.Mapping.Codec.Encode(info.Object)
-		if err != nil {
-			fmt.Fprintf(v.Err, "error: %v\n", err)
-			failed = true
-			continue
-		}
 		var obj runtime.Object
 		if len(info.ResourceVersion) == 0 {
-			obj, err = resource.NewHelper(info.Client, info.Mapping).Create(info.Namespace, false, data)
+			obj, err = resource.NewHelper(info.Client, info.Mapping).Create(info.Namespace, false, info.Object)
 		} else {
-			obj, err = resource.NewHelper(info.Client, info.Mapping).Replace(info.Namespace, info.Name, true, data)
+			obj, err = resource.NewHelper(info.Client, info.Mapping).Replace(info.Namespace, info.Name, true, info.Object)
 		}
 		if err != nil {
 			handlePodUpdateError(v.Err, err, "volume")
@@ -723,7 +723,7 @@ func describeVolumeSource(source *kapi.VolumeSource) string {
 	case source.HostPath != nil:
 		return fmt.Sprintf("host path %s", source.HostPath.Path)
 	case source.ISCSI != nil:
-		return fmt.Sprintf("ISCSI %s target-portal=%s type=%s lun=%s%s", source.ISCSI.IQN, source.ISCSI.TargetPortal, source.ISCSI.FSType, source.ISCSI.Lun, sourceAccessMode(source.ISCSI.ReadOnly))
+		return fmt.Sprintf("ISCSI %s target-portal=%s type=%s lun=%d%s", source.ISCSI.IQN, source.ISCSI.TargetPortal, source.ISCSI.FSType, source.ISCSI.Lun, sourceAccessMode(source.ISCSI.ReadOnly))
 	case source.NFS != nil:
 		return fmt.Sprintf("NFS %s:%s%s", source.NFS.Server, source.NFS.Path, sourceAccessMode(source.NFS.ReadOnly))
 	case source.PersistentVolumeClaim != nil:

@@ -2,6 +2,8 @@ package api
 
 import (
 	kapi "k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/unversioned"
+	kutil "k8s.io/kubernetes/pkg/util"
 )
 
 // DeploymentStatus describes the possible states a deployment can be in.
@@ -34,6 +36,10 @@ type DeploymentStrategy struct {
 	RollingParams *RollingDeploymentStrategyParams
 	// Resources contains resource requirements to execute the deployment
 	Resources kapi.ResourceRequirements
+	// Labels is a set of key, value pairs added to custom deployer and lifecycle pre/post hook pods.
+	Labels map[string]string
+	// Annotations is a set of key, value pairs added to custom deployer and lifecycle pre/post hook pods.
+	Annotations map[string]string
 }
 
 // DeploymentStrategyType refers to a specific DeploymentStrategy implementation.
@@ -101,6 +107,9 @@ type ExecNewPodHook struct {
 	// ContainerName is the name of a container in the deployment pod template
 	// whose Docker image will be used for the hook pod's container.
 	ContainerName string
+	// Volumes is a list of named volumes from the pod template which should be
+	// copied to the hook pod.
+	Volumes []string
 }
 
 // RollingDeploymentStrategyParams are the input to the Rolling deployment
@@ -115,8 +124,32 @@ type RollingDeploymentStrategyParams struct {
 	// TimeoutSeconds is the time to wait for updates before giving up. If the
 	// value is nil, a default will be used.
 	TimeoutSeconds *int64
+	// The maximum number of pods that can be unavailable during the update.
+	// Value can be an absolute number (ex: 5) or a percentage of total pods at the start of update (ex: 10%).
+	// Absolute number is calculated from percentage by rounding up.
+	// This can not be 0 if MaxSurge is 0.
+	// By default, a fixed value of 1 is used.
+	// Example: when this is set to 30%, the old RC can be scaled down by 30%
+	// immediately when the rolling update starts. Once new pods are ready, old RC
+	// can be scaled down further, followed by scaling up the new RC, ensuring
+	// that at least 70% of original number of pods are available at all times
+	// during the update.
+	MaxUnavailable kutil.IntOrString
+	// The maximum number of pods that can be scheduled above the original number of
+	// pods.
+	// Value can be an absolute number (ex: 5) or a percentage of total pods at
+	// the start of the update (ex: 10%). This can not be 0 if MaxUnavailable is 0.
+	// Absolute number is calculated from percentage by rounding up.
+	// By default, a value of 1 is used.
+	// Example: when this is set to 30%, the new RC can be scaled up by 30%
+	// immediately when the rolling update starts. Once old pods have been killed,
+	// new RC can be scaled up further, ensuring that total number of pods running
+	// at any time during the update is atmost 130% of original pods.
+	MaxSurge kutil.IntOrString
 	// UpdatePercent is the percentage of replicas to scale up or down each
 	// interval. If nil, one replica will be scaled up and down each interval.
+	// If negative, the scale order will be down/up instead of up/down.
+	// DEPRECATED: Use MaxUnavailable/MaxSurge instead.
 	UpdatePercent *int
 	// Pre is a lifecycle hook which is executed before the deployment process
 	// begins. All LifecycleHookFailurePolicy values are supported.
@@ -182,6 +215,9 @@ const (
 	// DeploymentCancelledAnnotation indicates that the deployment has been cancelled
 	// The annotation value does not matter and its mere presence indicates cancellation
 	DeploymentCancelledAnnotation = "openshift.io/deployment.cancelled"
+	// DeploymentReplicasAnnotation is for internal use only and is for
+	// detecting external modifications to deployment replica counts.
+	DeploymentReplicasAnnotation = "openshift.io/deployment.replicas"
 )
 
 // These constants represent the various reasons for cancelling a deployment
@@ -207,29 +243,46 @@ const DeploymentCancelledAnnotationValue = "true"
 // state of the DeploymentConfig. Each change to the DeploymentConfig which should result in
 // a new deployment results in an increment of LatestVersion.
 type DeploymentConfig struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
+
+	// Spec represents a desired deployment state and how to deploy to it.
+	Spec DeploymentConfigSpec
+
+	// Status represents the current deployment state.
+	Status DeploymentConfigStatus
+}
+
+// DeploymentConfigSpec represents the desired state of the deployment.
+type DeploymentConfigSpec struct {
+	// Strategy describes how a deployment is executed.
+	Strategy DeploymentStrategy
+
 	// Triggers determine how updates to a DeploymentConfig result in new deployments. If no triggers
 	// are defined, a new deployment can only occur as a result of an explicit client update to the
 	// DeploymentConfig with a new LatestVersion.
 	Triggers []DeploymentTriggerPolicy
-	// Template represents a desired deployment state and how to deploy it.
-	Template DeploymentTemplate
+
+	// Replicas is the number of desired replicas.
+	Replicas int
+
+	// Selector is a label query over pods that should match the Replicas count.
+	Selector map[string]string
+
+	// Template is the object that describes the pod that will be created if
+	// insufficient replicas are detected. Internally, this takes precedence over a
+	// TemplateRef.
+	Template *kapi.PodTemplateSpec
+}
+
+// DeploymentConfigStatus represents the current deployment state.
+type DeploymentConfigStatus struct {
 	// LatestVersion is used to determine whether the current deployment associated with a DeploymentConfig
 	// is out of sync.
 	LatestVersion int
 	// Details are the reasons for the update to this deployment config.
 	// This could be based on a change made by the user or caused by an automatic trigger
 	Details *DeploymentDetails
-}
-
-// DeploymentTemplate contains all the necessary information to create a deployment from a
-// DeploymentStrategy.
-type DeploymentTemplate struct {
-	// Strategy describes how a deployment is executed.
-	Strategy DeploymentStrategy
-	// ControllerTemplate is the desired replication state the deployment works to materialize.
-	ControllerTemplate kapi.ReplicationControllerSpec
 }
 
 // DeploymentTriggerPolicy describes a policy for a single trigger that results in a new deployment.
@@ -260,17 +313,10 @@ type DeploymentTriggerImageChangeParams struct {
 	Automatic bool
 	// ContainerNames is used to restrict tag updates to the specified set of container names in a pod.
 	ContainerNames []string
-	// RepositoryName is the identifier for a Docker image repository to watch for changes.
-	// DEPRECATED: will be removed in v1beta3.
-	RepositoryName string
-	// From is a reference to a Docker image repository to watch for changes. This field takes
-	// precedence over RepositoryName, which is deprecated and will be removed in v1beta3. The
-	// Kind may be left blank, in which case it defaults to "ImageRepository". The "Name" is
-	// the only required subfield - if Namespace is blank, the namespace of the current deployment
+	// From is a reference to an image stream tag to watch for changes. From.Name is the only
+	// required subfield - if From.Namespace is blank, the namespace of the current deployment
 	// trigger will be used.
 	From kapi.ObjectReference
-	// Tag is the name of an image repository tag to watch for changes.
-	Tag string
 	// LastTriggeredImage is the last image to be triggered.
 	LastTriggeredImage string
 }
@@ -293,16 +339,15 @@ type DeploymentCause struct {
 
 // DeploymentCauseImageTrigger contains information about a deployment caused by an image trigger
 type DeploymentCauseImageTrigger struct {
-	// RepositoryName is the identifier for a Docker image repository that was updated.
-	RepositoryName string
-	// Tag is the name of an image repository tag that is now pointing to a new image.
-	Tag string
+	// From is a reference to the changed object which triggered a deployment. The field may have
+	// the kinds DockerImage, ImageStreamTag, or ImageStreamImage.
+	From kapi.ObjectReference
 }
 
 // DeploymentConfigList is a collection of deployment configs.
 type DeploymentConfigList struct {
-	kapi.TypeMeta
-	kapi.ListMeta
+	unversioned.TypeMeta
+	unversioned.ListMeta
 
 	// Items is a list of deployment configs
 	Items []DeploymentConfig
@@ -310,7 +355,7 @@ type DeploymentConfigList struct {
 
 // DeploymentConfigRollback provides the input to rollback generation.
 type DeploymentConfigRollback struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	// Spec defines the options to rollback generation.
 	Spec DeploymentConfigRollbackSpec
 }
@@ -327,4 +372,49 @@ type DeploymentConfigRollbackSpec struct {
 	IncludeReplicationMeta bool
 	// IncludeStrategy specifies whether to include the deployment Strategy.
 	IncludeStrategy bool
+}
+
+// DeploymentLog represents the logs for a deployment
+type DeploymentLog struct {
+	unversioned.TypeMeta
+}
+
+// DeploymentLogOptions is the REST options for a deployment log
+type DeploymentLogOptions struct {
+	unversioned.TypeMeta
+
+	// Container for which to return logs
+	Container string
+	// Follow if true indicates that the deployment log should be streamed until
+	// the deployment terminates.
+	Follow bool
+	// If true, return previous terminated container logs
+	Previous bool
+	// A relative time in seconds before the current time from which to show logs. If this value
+	// precedes the time a pod was started, only logs since the pod start will be returned.
+	// If this value is in the future, no logs will be returned.
+	// Only one of sinceSeconds or sinceTime may be specified.
+	SinceSeconds *int64
+	// An RFC3339 timestamp from which to show logs. If this value
+	// preceeds the time a pod was started, only logs since the pod start will be returned.
+	// If this value is in the future, no logs will be returned.
+	// Only one of sinceSeconds or sinceTime may be specified.
+	SinceTime *unversioned.Time
+	// If true, add an RFC3339 or RFC3339Nano timestamp at the beginning of every line
+	// of log output.
+	Timestamps bool
+	// If set, the number of lines from the end of the logs to show. If not specified,
+	// logs are shown from the creation of the container or sinceSeconds or sinceTime
+	TailLines *int64
+	// If set, the number of bytes to read from the server before terminating the
+	// log output. This may not display a complete final line of logging, and may return
+	// slightly more or slightly less than the specified limit.
+	LimitBytes *int64
+
+	// NoWait if true causes the call to return immediately even if the deployment
+	// is not available yet. Otherwise the server will wait until the deployment has started.
+	NoWait bool
+
+	// Version of the deployment for which to view logs.
+	Version *int64
 }

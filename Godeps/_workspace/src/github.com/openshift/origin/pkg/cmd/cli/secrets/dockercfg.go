@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"k8s.io/kubernetes/pkg/api"
-	"k8s.io/kubernetes/pkg/client"
+	client "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/credentialprovider"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
@@ -31,23 +31,19 @@ authenticate to the registry.
 
 When creating applications, you may have a Docker registry that requires authentication.  In order for the
 nodes to pull images on your behalf, they have to have the credentials.  You can provide this information
-by creating a dockercfg secret and attaching it to your service account.
+by creating a dockercfg secret and attaching it to your service account.`
 
-If you don't already have a .dockercfg file, you can create a dockercfg secret directly by using:
+	createDockercfgExample = `  // If you don't already have a .dockercfg file, you can create a dockercfg secret directly by using:
+  $ %[1]s SECRET --docker-server=DOCKER_REGISTRY_SERVER --docker-username=DOCKER_USER --docker-password=DOCKER_PASSWORD --docker-email=DOCKER_EMAIL
 
-  $ %s SECRET_NAME --docker-server=DOCKER_REGISTRY_SERVER --docker-username=DOCKER_USER --docker-password=DOCKER_PASSWORD --docker-email=DOCKER_EMAIL
+  // If you do already have a .dockercfg file, you can create a dockercfg secret by using:
+  $ %[2]s SECRET path/to/.dockercfg
 
-If you do already have a .dockercfg file, you can create a dockercfg secret by using:
-
-  $ %s SECRET_NAME path/to/.dockercfg
-
-You can then use '%s SERVICE_ACCOUNT' to add the new secret to 'imagePullSecrets' for the node to use or
-'secrets' for builds to use.
-`
+  // To add new secret to 'imagePullSecrets' for the node, or 'secrets' for builds, use:
+  $ %[3]s SERVICE_ACCOUNT`
 )
 
 type CreateDockerConfigOptions struct {
-	SecretNamespace  string
 	SecretName       string
 	RegistryLocation string
 	Username         string
@@ -64,9 +60,10 @@ func NewCmdCreateDockerConfigSecret(name, fullName string, f *cmdutil.Factory, o
 	o := &CreateDockerConfigOptions{Out: out}
 
 	cmd := &cobra.Command{
-		Use:   fmt.Sprintf("%s SECRET_NAME --docker-server=DOCKER_REGISTRY_SERVER --docker-username=DOCKER_USER --docker-password=DOCKER_PASSWORD --docker-email=DOCKER_EMAIL", name),
-		Short: "Create a new dockercfg secret",
-		Long:  fmt.Sprintf(createDockercfgLong, fullName, newSecretFullName, ocEditFullName),
+		Use:     fmt.Sprintf("%s SECRET --docker-server=DOCKER_REGISTRY_SERVER --docker-username=DOCKER_USER --docker-password=DOCKER_PASSWORD --docker-email=DOCKER_EMAIL", name),
+		Short:   "Create a new dockercfg secret",
+		Long:    createDockercfgLong,
+		Example: fmt.Sprintf(createDockercfgExample, fullName, newSecretFullName, ocEditFullName),
 		Run: func(c *cobra.Command, args []string) {
 			if err := o.Complete(f, args); err != nil {
 				cmdutil.CheckErr(cmdutil.UsageError(c, err.Error()))
@@ -77,7 +74,7 @@ func NewCmdCreateDockerConfigSecret(name, fullName string, f *cmdutil.Factory, o
 			}
 
 			if len(cmdutil.GetFlagString(c, "output")) != 0 {
-				secret, err := o.MakeDockerSecret()
+				secret, err := o.NewDockerSecret()
 				cmdutil.CheckErr(err)
 
 				cmdutil.CheckErr(f.PrintObject(c, secret, out))
@@ -91,17 +88,17 @@ func NewCmdCreateDockerConfigSecret(name, fullName string, f *cmdutil.Factory, o
 		},
 	}
 
-	cmd.Flags().StringVar(&o.Username, "docker-username", "", "username for Docker registry authentication")
-	cmd.Flags().StringVar(&o.Password, "docker-password", "", "password for Docker registry authentication")
-	cmd.Flags().StringVar(&o.EmailAddress, "docker-email", "", "email for Docker registry")
-	cmd.Flags().StringVar(&o.RegistryLocation, "docker-server", "https://index.docker.io/v1/", "server location for Docker registry")
+	cmd.Flags().StringVar(&o.Username, "docker-username", "", "Username for Docker registry authentication")
+	cmd.Flags().StringVar(&o.Password, "docker-password", "", "Password for Docker registry authentication")
+	cmd.Flags().StringVar(&o.EmailAddress, "docker-email", "", "Email for Docker registry")
+	cmd.Flags().StringVar(&o.RegistryLocation, "docker-server", "https://index.docker.io/v1/", "Server location for Docker registry")
 	cmdutil.AddPrinterFlags(cmd)
 
 	return cmd
 }
 
 func (o CreateDockerConfigOptions) CreateDockerSecret() error {
-	secret, err := o.MakeDockerSecret()
+	secret, err := o.NewDockerSecret()
 	if err != nil {
 		return err
 	}
@@ -115,11 +112,7 @@ func (o CreateDockerConfigOptions) CreateDockerSecret() error {
 	return nil
 }
 
-func (o CreateDockerConfigOptions) MakeDockerSecret() (*api.Secret, error) {
-	if err := o.Validate(); err != nil {
-		return nil, err
-	}
-
+func (o CreateDockerConfigOptions) NewDockerSecret() (*api.Secret, error) {
 	dockercfgAuth := credentialprovider.DockerConfigEntry{
 		Username: o.Username,
 		Password: o.Password,
@@ -134,7 +127,6 @@ func (o CreateDockerConfigOptions) MakeDockerSecret() (*api.Secret, error) {
 	}
 
 	secret := &api.Secret{}
-	secret.Namespace = o.SecretNamespace
 	secret.Name = o.SecretName
 	secret.Type = api.SecretTypeDockercfg
 	secret.Data = map[string][]byte{}
@@ -153,20 +145,17 @@ func (o *CreateDockerConfigOptions) Complete(f *cmdutil.Factory, args []string) 
 	if err != nil {
 		return err
 	}
-	o.SecretNamespace, _, err = f.DefaultNamespace()
+	namespace, _, err := f.DefaultNamespace()
 	if err != nil {
 		return err
 	}
 
-	o.SecretsInterface = client.Secrets(o.SecretNamespace)
+	o.SecretsInterface = client.Secrets(namespace)
 
 	return nil
 }
 
 func (o CreateDockerConfigOptions) Validate() error {
-	if len(o.SecretNamespace) == 0 {
-		return errors.New("secret namespace must be present")
-	}
 	if len(o.SecretName) == 0 {
 		return errors.New("secret name must be present")
 	}

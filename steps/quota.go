@@ -2,6 +2,7 @@ package steps
 
 import (
 	kapi "k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
 
 	"github.com/stretchr/testify/assert"
@@ -54,7 +55,7 @@ func (c *Context) GetResourceQuotas() ([]kapi.ResourceQuota, error) {
 		return nil, err
 	}
 
-	quotas, err := kclient.ResourceQuotas(namespace).List(labels.Everything())
+	quotas, err := kclient.ResourceQuotas(namespace).List(labels.Everything(), fields.Everything())
 	if err != nil {
 		return nil, err
 	}

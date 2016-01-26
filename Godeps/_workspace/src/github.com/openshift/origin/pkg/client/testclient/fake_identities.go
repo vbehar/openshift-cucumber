@@ -1,7 +1,7 @@
 package testclient
 
 import (
-	ktestclient "k8s.io/kubernetes/pkg/client/testclient"
+	ktestclient "k8s.io/kubernetes/pkg/client/unversioned/testclient"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
 
@@ -48,4 +48,9 @@ func (c *FakeIdentities) Update(inObj *userapi.Identity) (*userapi.Identity, err
 	}
 
 	return obj.(*userapi.Identity), err
+}
+
+func (c *FakeIdentities) Delete(name string) error {
+	_, err := c.Fake.Invokes(ktestclient.NewRootDeleteAction("identities", name), nil)
+	return err
 }

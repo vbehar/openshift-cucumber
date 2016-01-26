@@ -9,14 +9,13 @@ import (
 
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/meta"
-	"k8s.io/kubernetes/pkg/client"
+	client "k8s.io/kubernetes/pkg/client/unversioned"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
 	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util"
+	"k8s.io/kubernetes/pkg/util/sets"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 const (
@@ -26,20 +25,16 @@ const (
 	addSecretLong = `
 Add secrets to a ServiceAccount
 
-After you have created a secret, you probably want to make use of that secret inside of a pod, for a build, or as an image pull secret.  In order to do that, you must add your secret to a service account.
+After you have created a secret, you probably want to make use of that secret inside of a pod, for a build, or as an image pull secret.  In order to do that, you must add your secret to a service account.`
 
-To use your secret inside of a pod or as a push, pull, or source secret for a build, you must add a 'mount' secret to your service account like this:
-
+	addSecretExample = `  // To use your secret inside of a pod or as a push, pull, or source secret for a build, you must add a 'mount' secret to your service account like this:
   $ %[1]s serviceaccount/sa-name secrets/secret-name secrets/another-secret-name
 
-To use your secret as an image pull secret, you must add a 'pull' secret to your service account like this:
-
+  // To use your secret as an image pull secret, you must add a 'pull' secret to your service account like this:
   $ %[1]s serviceaccount/sa-name secrets/secret-name --for=pull
 
-To use your secret for image pulls or inside a pod:
-
-  $ %[1]s serviceaccount/sa-name secrets/secret-name --for=pull,mount
-`
+  // To use your secret for image pulls or inside a pod:
+  $ %[1]s serviceaccount/sa-name secrets/secret-name --for=pull,mount`
 )
 
 type AddSecretOptions struct {
@@ -62,12 +57,13 @@ type AddSecretOptions struct {
 // NewCmdAddSecret creates a command object for adding a secret reference to a service account
 func NewCmdAddSecret(name, fullName string, f *cmdutil.Factory, out io.Writer) *cobra.Command {
 	o := &AddSecretOptions{Out: out}
-	var typeFlags util.StringList
+	var typeFlags []string
 
 	cmd := &cobra.Command{
-		Use:   fmt.Sprintf("%s serviceaccounts/sa-name secrets/secret-name [secrets/another-secret-name]...", name),
-		Short: "Add secrets to a ServiceAccount",
-		Long:  fmt.Sprintf(addSecretLong, fullName),
+		Use:     fmt.Sprintf("%s serviceaccounts/sa-name secrets/secret-name [secrets/another-secret-name]...", name),
+		Short:   "Add secrets to a ServiceAccount",
+		Long:    addSecretLong,
+		Example: fmt.Sprintf(addSecretExample, fullName),
 		Run: func(c *cobra.Command, args []string) {
 			if err := o.Complete(f, args, typeFlags); err != nil {
 				cmdutil.CheckErr(cmdutil.UsageError(c, err.Error()))
@@ -84,13 +80,7 @@ func NewCmdAddSecret(name, fullName string, f *cmdutil.Factory, out io.Writer) *
 		},
 	}
 
-	forFlag := &pflag.Flag{
-		Name:     "for",
-		Usage:    "type of secret to add: mount or pull",
-		Value:    &typeFlags,
-		DefValue: "mount",
-	}
-	cmd.Flags().AddFlag(forFlag)
+	cmd.Flags().StringSliceVar(&typeFlags, "for", []string{"mount"}, "type of secret to add: mount or pull")
 
 	return cmd
 }
@@ -164,7 +154,7 @@ func (o AddSecretOptions) Validate() error {
 func (o AddSecretOptions) AddSecrets() error {
 	r := resource.NewBuilder(o.Mapper, o.Typer, o.ClientMapper).
 		NamespaceParam(o.Namespace).
-		ResourceTypeOrNameArgs(false, o.TargetName).
+		ResourceNames("serviceaccounts", o.TargetName).
 		SingleResourceType().
 		Do()
 	if r.Err() != nil {
@@ -225,7 +215,7 @@ func (o AddSecretOptions) addSecretsToServiceAccount(serviceaccount *kapi.Servic
 func (o AddSecretOptions) getSecrets() ([]*kapi.Secret, error) {
 	r := resource.NewBuilder(o.Mapper, o.Typer, o.ClientMapper).
 		NamespaceParam(o.Namespace).
-		ResourceTypeOrNameArgs(false, o.SecretNames...).
+		ResourceNames("secrets", o.SecretNames...).
 		SingleResourceType().
 		Do()
 	if r.Err() != nil {
@@ -251,24 +241,24 @@ func (o AddSecretOptions) getSecrets() ([]*kapi.Secret, error) {
 	return secrets, nil
 }
 
-func getSecretNames(secrets []*kapi.Secret) util.StringSet {
-	names := util.StringSet{}
+func getSecretNames(secrets []*kapi.Secret) sets.String {
+	names := sets.String{}
 	for _, secret := range secrets {
 		names.Insert(secret.Name)
 	}
 	return names
 }
 
-func getMountSecretNames(serviceaccount *kapi.ServiceAccount) util.StringSet {
-	names := util.StringSet{}
+func getMountSecretNames(serviceaccount *kapi.ServiceAccount) sets.String {
+	names := sets.String{}
 	for _, secret := range serviceaccount.Secrets {
 		names.Insert(secret.Name)
 	}
 	return names
 }
 
-func getPullSecretNames(serviceaccount *kapi.ServiceAccount) util.StringSet {
-	names := util.StringSet{}
+func getPullSecretNames(serviceaccount *kapi.ServiceAccount) sets.String {
+	names := sets.String{}
 	for _, secret := range serviceaccount.ImagePullSecrets {
 		names.Insert(secret.Name)
 	}

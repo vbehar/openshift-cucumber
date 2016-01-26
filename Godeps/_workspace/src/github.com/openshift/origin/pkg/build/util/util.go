@@ -1,24 +1,23 @@
 package util
 
 import (
+	"fmt"
 	"strings"
 
 	kapi "k8s.io/kubernetes/pkg/api"
 
 	buildapi "github.com/openshift/origin/pkg/build/api"
-	"github.com/openshift/origin/pkg/util/namer"
 )
 
 const (
-	// BuildPodSuffix is the suffix used to append to a build pod name given a build name
-	BuildPodSuffix = "build"
 	// NoBuildLogsMessage reports that no build logs are available
 	NoBuildLogsMessage = "No logs are available."
 )
 
 // GetBuildPodName returns name of the build pod.
+// TODO: remove in favor of the one in the api package
 func GetBuildPodName(build *buildapi.Build) string {
-	return namer.GetPodName(build.Name, BuildPodSuffix)
+	return buildapi.GetBuildPodName(build)
 }
 
 // GetBuildName returns name of the build pod.
@@ -32,12 +31,12 @@ func GetBuildName(pod *kapi.Pod) string {
 // GetImageStreamForStrategy returns the ImageStream[Tag/Image] ObjectReference associated
 // with the BuildStrategy.
 func GetImageStreamForStrategy(strategy buildapi.BuildStrategy) *kapi.ObjectReference {
-	switch strategy.Type {
-	case buildapi.SourceBuildStrategyType:
+	switch {
+	case strategy.SourceStrategy != nil:
 		return &strategy.SourceStrategy.From
-	case buildapi.DockerBuildStrategyType:
+	case strategy.DockerStrategy != nil:
 		return strategy.DockerStrategy.From
-	case buildapi.CustomBuildStrategyType:
+	case strategy.CustomStrategy != nil:
 		return &strategy.CustomStrategy.From
 	default:
 		return nil
@@ -66,12 +65,8 @@ func IsBuildComplete(build *buildapi.Build) bool {
 	return build.Status.Phase != buildapi.BuildPhaseRunning && build.Status.Phase != buildapi.BuildPhasePending && build.Status.Phase != buildapi.BuildPhaseNew
 }
 
-// GetBuildLabel retrieves build label from a Pod returning its value and
-// a boolean value informing whether the value was found
-func GetBuildLabel(pod *kapi.Pod) (string, bool) {
-	value, exists := pod.Labels[buildapi.BuildLabel]
-	if !exists {
-		value, exists = pod.Labels[buildapi.DeprecatedBuildLabel]
-	}
-	return value, exists
+// BuildNameForConfigVersion returns the name of the version-th build
+// for the config that has the provided name
+func BuildNameForConfigVersion(name string, version int) string {
+	return fmt.Sprintf("%s-%d", name, version)
 }

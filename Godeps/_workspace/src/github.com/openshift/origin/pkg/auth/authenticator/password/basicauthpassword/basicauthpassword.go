@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strings"
 
 	"github.com/golang/glog"
 
@@ -68,6 +69,12 @@ func (a *Authenticator) AuthenticatePassword(username, password string) (user.In
 		return nil, false, err
 	}
 
+	// Basic auth does not support usernames containing colons
+	// http://tools.ietf.org/html/rfc2617#section-2
+	if strings.Contains(username, ":") {
+		return nil, false, fmt.Errorf("invalid username")
+	}
+
 	req.SetBasicAuth(username, password)
 	req.Header.Set("Accept", "application/json")
 
@@ -118,10 +125,10 @@ func (a *Authenticator) AuthenticatePassword(username, password string) (user.In
 	}
 
 	user, err := a.mapper.UserFor(identity)
-	glog.V(4).Infof("Got userIdentityMapping: %#v", user)
 	if err != nil {
 		return nil, false, fmt.Errorf("Error creating or updating mapping for: %#v due to %v", identity, err)
 	}
+	glog.V(4).Infof("Got userIdentityMapping: %#v", user)
 
 	return user, true, nil
 }

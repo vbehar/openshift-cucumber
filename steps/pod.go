@@ -33,7 +33,7 @@ func init() {
 				return
 			}
 
-			deployment := fmt.Sprintf("%v-%v", dc.Name, dc.LatestVersion)
+			deployment := fmt.Sprintf("%v-%v", dc.Name, dc.Status.LatestVersion)
 			deploymentSelector := labels.Set{deployapi.DeploymentLabel: deployment}.AsSelector()
 			pods, err := c.GetPods(deploymentSelector)
 			if err != nil {

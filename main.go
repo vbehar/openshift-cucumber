@@ -12,8 +12,6 @@ import (
 	"github.com/vbehar/openshift-cucumber/reporter"
 	"github.com/vbehar/openshift-cucumber/steps"
 
-	"k8s.io/kubernetes/pkg/util"
-
 	"github.com/lsegal/gucumber"
 	"github.com/spf13/pflag"
 )
@@ -34,7 +32,7 @@ func main() {
 	printVersion := flags.BoolP("version", "v", false, "print version")
 	reporterName := flags.StringP("reporter", "r", "", "reporter (junit)")
 	outputFile := flags.StringP("output", "o", "", "output file")
-	util.AddFlagSetToPFlagSet(flag.CommandLine, flags) // import glog flags
+	//util.AddFlagSetToPFlagSet(flag.CommandLine, flags) // import glog flags
 	flags.Parse(os.Args[1:])
 
 	if *printVersion {

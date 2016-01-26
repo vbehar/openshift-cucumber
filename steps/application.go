@@ -69,7 +69,12 @@ func (c *Context) NewAppFromTemplate(templateName string, templateParameters []s
 	mapper, typer := factory.Object()
 	clientMapper := factory.ClientMapperForCommand()
 
-	appConfig := cmd.NewAppConfig(typer, mapper, clientMapper)
+	appConfig := cmd.NewAppConfig()
+	appConfig.SetTyper(typer)
+	appConfig.SetMapper(mapper)
+	appConfig.SetClientMapper(clientMapper)
+	appConfig.Out = os.Stdout
+	appConfig.ErrOut = os.Stderr
 	appConfig.SetOpenShiftClient(client, namespace)
 	appConfig.Components = append(appConfig.Components, templateName)
 	if len(templateParameters) > 0 {
@@ -77,7 +82,7 @@ func (c *Context) NewAppFromTemplate(templateName string, templateParameters []s
 	}
 
 	// parse
-	appResult, err := appConfig.RunAll(os.Stdout, os.Stderr)
+	appResult, err := appConfig.Run()
 	if err != nil {
 		return nil, []error{err}
 	}

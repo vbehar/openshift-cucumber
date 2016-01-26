@@ -2,20 +2,18 @@ package build
 
 import (
 	"fmt"
-	"time"
 
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/errors"
+	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/registry/generic"
 	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util"
 	"k8s.io/kubernetes/pkg/util/fielderrors"
 
 	"github.com/openshift/origin/pkg/build/api"
 	"github.com/openshift/origin/pkg/build/api/validation"
-	buildutil "github.com/openshift/origin/pkg/build/util"
 )
 
 // strategy implements behavior for Build objects
@@ -31,11 +29,11 @@ var Decorator = func(obj runtime.Object) error {
 		return errors.NewBadRequest(fmt.Sprintf("not a build: %v", build))
 	}
 	if build.Status.StartTimestamp == nil {
-		build.Status.Duration = time.Duration(0)
+		build.Status.Duration = 0
 	} else {
 		completionTimestamp := build.Status.CompletionTimestamp
 		if completionTimestamp == nil {
-			dummy := util.Now()
+			dummy := unversioned.Now()
 			completionTimestamp = &dummy
 		}
 		build.Status.Duration = completionTimestamp.Rfc3339Copy().Time.Sub(build.Status.StartTimestamp.Rfc3339Copy().Time)
@@ -97,16 +95,44 @@ func Matcher(label labels.Selector, field fields.Selector) generic.Matcher {
 			if !ok {
 				return nil, nil, fmt.Errorf("not a build")
 			}
-			return labels.Set(build.ObjectMeta.Labels), SelectableFields(build), nil
+			return labels.Set(build.ObjectMeta.Labels), api.BuildToSelectableFields(build), nil
 		},
 	}
 }
 
-// SelectableFields returns a label set that represents the object
-func SelectableFields(build *api.Build) fields.Set {
-	return fields.Set{
-		"metadata.name": build.Name,
-		"status":        string(build.Status.Phase),
-		"podName":       buildutil.GetBuildPodName(build),
-	}
+type detailsStrategy struct {
+	strategy
 }
+
+// Prepares a build for update by only allowing an update to build details.
+// For now, this is the Spec.Revision field
+func (detailsStrategy) PrepareForUpdate(obj, old runtime.Object) {
+	newBuild := obj.(*api.Build)
+	oldBuild := old.(*api.Build)
+	revision := newBuild.Spec.Revision
+	*newBuild = *oldBuild
+	newBuild.Spec.Revision = revision
+}
+
+// Validates that an update is valid by ensuring that no Revision exists and that it's not getting updated to blank
+func (detailsStrategy) ValidateUpdate(ctx kapi.Context, obj, old runtime.Object) fielderrors.ValidationErrorList {
+	newBuild := obj.(*api.Build)
+	oldBuild := old.(*api.Build)
+	errors := fielderrors.ValidationErrorList{}
+	if oldBuild.Spec.Revision != nil {
+		// If there was already a revision, then return an error
+		errors = append(errors, fielderrors.NewFieldDuplicate("status.Revision", oldBuild.Spec.Revision))
+	}
+	if newBuild.Spec.Revision == nil {
+		errors = append(errors, fielderrors.NewFieldInvalid("status.Revision", nil, "cannot set an empty revision in build status"))
+	}
+	return errors
+}
+
+// AllowUnconditionalUpdate returns true to allow a Build with an empty resourceVersion to update the Revision
+func (detailsStrategy) AllowUnconditionalUpdate() bool {
+	return true
+}
+
+// DetailsStrategy is the strategy used to manage updates to a Build revision
+var DetailsStrategy = detailsStrategy{Strategy}

@@ -164,6 +164,9 @@ func addDefaultingFuncs() {
 				obj.APIVersion = "v1beta3"
 			}
 		},
+		func(obj *SecurityContextConstraints) {
+			defaultSecurityContextConstraints(obj)
+		},
 	)
 }
 
@@ -214,5 +217,16 @@ func defaultSecurityContext(container *Container) {
 		if *container.SecurityContext.Privileged && !container.Privileged {
 			container.Privileged = *container.SecurityContext.Privileged
 		}
+	}
+}
+
+// Default SCCs for new fields.  FSGroup and SupplementalGroups are
+// set to the RunAsAny strategy if they are unset on the scc.
+func defaultSecurityContextConstraints(scc *SecurityContextConstraints) {
+	if len(scc.FSGroup.Type) == 0 {
+		scc.FSGroup.Type = FSGroupStrategyRunAsAny
+	}
+	if len(scc.SupplementalGroups.Type) == 0 {
+		scc.SupplementalGroups.Type = SupplementalGroupsStrategyRunAsAny
 	}
 }

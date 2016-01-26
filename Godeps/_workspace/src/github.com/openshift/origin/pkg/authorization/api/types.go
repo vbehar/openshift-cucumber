@@ -2,8 +2,9 @@ package api
 
 import (
 	kapi "k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/unversioned"
 	kruntime "k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util"
+	"k8s.io/kubernetes/pkg/util/sets"
 )
 
 // Authorization is calculated against
@@ -16,73 +17,85 @@ import (
 const (
 	// PolicyName is the name of Policy
 	PolicyName     = "default"
+	APIGroupAll    = "*"
 	ResourceAll    = "*"
 	VerbAll        = "*"
 	NonResourceAll = "*"
+
+	UserKind           = "User"
+	GroupKind          = "Group"
+	ServiceAccountKind = "ServiceAccount"
+	SystemUserKind     = "SystemUser"
+	SystemGroupKind    = "SystemGroup"
 )
 
 const (
+	APIGroupExtensions = "extensions"
+
 	// ResourceGroupPrefix is the prefix for indicating that a resource entry is actually a group of resources.  The groups are defined in code and indicate resources that are commonly permissioned together
-	ResourceGroupPrefix = "resourcegroup"
-	BuildGroupName      = ResourceGroupPrefix + ":builds"
-	DeploymentGroupName = ResourceGroupPrefix + ":deployments"
-	ImageGroupName      = ResourceGroupPrefix + ":images"
-	OAuthGroupName      = ResourceGroupPrefix + ":oauth"
-	UserGroupName       = ResourceGroupPrefix + ":users"
-	TemplateGroupName   = ResourceGroupPrefix + ":templates"
-	SDNGroupName        = ResourceGroupPrefix + ":sdn"
+	ResourceGroupPrefix = "resourcegroup:"
+	BuildGroupName      = ResourceGroupPrefix + "builds"
+	DeploymentGroupName = ResourceGroupPrefix + "deployments"
+	ImageGroupName      = ResourceGroupPrefix + "images"
+	OAuthGroupName      = ResourceGroupPrefix + "oauth"
+	UserGroupName       = ResourceGroupPrefix + "users"
+	TemplateGroupName   = ResourceGroupPrefix + "templates"
+	SDNGroupName        = ResourceGroupPrefix + "sdn"
 	// PolicyOwnerGroupName includes the physical resources behind the PermissionGrantingGroupName.  Unless these physical objects are created first, users with privileges to PermissionGrantingGroupName will
 	// only be able to bind to global roles
-	PolicyOwnerGroupName = ResourceGroupPrefix + ":policy"
+	PolicyOwnerGroupName = ResourceGroupPrefix + "policy"
 	// PermissionGrantingGroupName includes resources that are necessary to maintain authorization roles and bindings.  By itself, this group is insufficient to create anything except for bindings
 	// to master roles.  If a local Policy already exists, then privileges to this group will allow for modification of local roles.
-	PermissionGrantingGroupName = ResourceGroupPrefix + ":granter"
+	PermissionGrantingGroupName = ResourceGroupPrefix + "granter"
 	// OpenshiftExposedGroupName includes resources that are commonly viewed and modified by end users of the system.  It does not include any sensitive resources that control authentication or authorization
-	OpenshiftExposedGroupName = ResourceGroupPrefix + ":exposedopenshift"
-	OpenshiftAllGroupName     = ResourceGroupPrefix + ":allopenshift"
-	OpenshiftStatusGroupName  = ResourceGroupPrefix + ":allopenshift-status"
+	OpenshiftExposedGroupName = ResourceGroupPrefix + "exposedopenshift"
+	OpenshiftAllGroupName     = ResourceGroupPrefix + "allopenshift"
+	OpenshiftStatusGroupName  = ResourceGroupPrefix + "allopenshift-status"
 
-	QuotaGroupName = ResourceGroupPrefix + ":quota"
+	QuotaGroupName = ResourceGroupPrefix + "quota"
 	// KubeInternalsGroupName includes those resources that should reasonably be viewable to end users, but that most users should probably not modify.  Kubernetes herself will maintain these resources
-	KubeInternalsGroupName = ResourceGroupPrefix + ":privatekube"
+	KubeInternalsGroupName = ResourceGroupPrefix + "privatekube"
 	// KubeExposedGroupName includes resources that are commonly viewed and modified by end users of the system.
-	KubeExposedGroupName = ResourceGroupPrefix + ":exposedkube"
-	KubeAllGroupName     = ResourceGroupPrefix + ":allkube"
-	KubeStatusGroupName  = ResourceGroupPrefix + ":allkube-status"
+	KubeExposedGroupName = ResourceGroupPrefix + "exposedkube"
+	KubeAllGroupName     = ResourceGroupPrefix + "allkube"
+	KubeStatusGroupName  = ResourceGroupPrefix + "allkube-status"
 
 	// NonEscalatingResourcesGroupName contains all resources that can be viewed without exposing the risk of using view rights to locate a secret to escalate privileges.  For example, view
 	// rights on secrets could be used locate a secret that happened to be  serviceaccount token that has more privileges
-	NonEscalatingResourcesGroupName         = ResourceGroupPrefix + ":non-escalating"
-	KubeNonEscalatingViewableGroupName      = ResourceGroupPrefix + ":kube-non-escalating"
-	OpenshiftNonEscalatingViewableGroupName = ResourceGroupPrefix + ":openshift-non-escalating"
+	NonEscalatingResourcesGroupName         = ResourceGroupPrefix + "non-escalating"
+	KubeNonEscalatingViewableGroupName      = ResourceGroupPrefix + "kube-non-escalating"
+	OpenshiftNonEscalatingViewableGroupName = ResourceGroupPrefix + "openshift-non-escalating"
 
 	// EscalatingResourcesGroupName contains all resources that can be used to escalate privileges when simply viewed
-	EscalatingResourcesGroupName         = ResourceGroupPrefix + ":escalating"
-	KubeEscalatingViewableGroupName      = ResourceGroupPrefix + ":kube-escalating"
-	OpenshiftEscalatingViewableGroupName = ResourceGroupPrefix + ":openshift-escalating"
+	EscalatingResourcesGroupName         = ResourceGroupPrefix + "escalating"
+	KubeEscalatingViewableGroupName      = ResourceGroupPrefix + "kube-escalating"
+	OpenshiftEscalatingViewableGroupName = ResourceGroupPrefix + "openshift-escalating"
 )
 
 var (
 	GroupsToResources = map[string][]string{
-		BuildGroupName:              {"builds", "buildconfigs", "buildlogs", "buildconfigs/instantiate", "builds/log", "builds/clone", "buildconfigs/webhooks"},
-		ImageGroupName:              {"imagestreams", "imagestreammappings", "imagestreamtags", "imagestreamimages"},
-		DeploymentGroupName:         {"deployments", "deploymentconfigs", "generatedeploymentconfigs", "deploymentconfigrollbacks"},
-		SDNGroupName:                {"clusternetworks", "hostsubnets", "netnamespaces"},
-		TemplateGroupName:           {"templates", "templateconfigs", "processedtemplates"},
-		UserGroupName:               {"identities", "users", "useridentitymappings", "groups"},
-		OAuthGroupName:              {"oauthauthorizetokens", "oauthaccesstokens", "oauthclients", "oauthclientauthorizations"},
-		PolicyOwnerGroupName:        {"policies", "policybindings"},
-		PermissionGrantingGroupName: {"roles", "rolebindings", "resourceaccessreviews", "subjectaccessreviews"},
+		BuildGroupName:       {"builds", "buildconfigs", "buildlogs", "buildconfigs/instantiate", "buildconfigs/instantiatebinary", "builds/log", "builds/clone", "buildconfigs/webhooks"},
+		ImageGroupName:       {"imagestreams", "imagestreammappings", "imagestreamtags", "imagestreamimages"},
+		DeploymentGroupName:  {"deployments", "deploymentconfigs", "generatedeploymentconfigs", "deploymentconfigrollbacks", "deploymentconfigs/log", "deploymentconfigs/scale"},
+		SDNGroupName:         {"clusternetworks", "hostsubnets", "netnamespaces"},
+		TemplateGroupName:    {"templates", "templateconfigs", "processedtemplates"},
+		UserGroupName:        {"identities", "users", "useridentitymappings", "groups"},
+		OAuthGroupName:       {"oauthauthorizetokens", "oauthaccesstokens", "oauthclients", "oauthclientauthorizations"},
+		PolicyOwnerGroupName: {"policies", "policybindings"},
+
+		// RAR and SAR are in this list to support backwards compatibility with clients that expect access to those resource in a namespace scope and a cluster scope.
+		// TODO remove once we have eliminated the namespace scoped resource.
+		PermissionGrantingGroupName: {"roles", "rolebindings", "resourceaccessreviews" /* cluster scoped*/, "subjectaccessreviews" /* cluster scoped*/, "localresourceaccessreviews", "localsubjectaccessreviews"},
 		OpenshiftExposedGroupName:   {BuildGroupName, ImageGroupName, DeploymentGroupName, TemplateGroupName, "routes"},
 		OpenshiftAllGroupName: {OpenshiftExposedGroupName, UserGroupName, OAuthGroupName, PolicyOwnerGroupName, SDNGroupName, PermissionGrantingGroupName, OpenshiftStatusGroupName, "projects",
-			"clusterroles", "clusterrolebindings", "clusterpolicies", "clusterpolicybindings", "images" /* cluster scoped*/, "projectrequests"},
-		OpenshiftStatusGroupName: {"imagestreams/status"},
+			"clusterroles", "clusterrolebindings", "clusterpolicies", "clusterpolicybindings", "images" /* cluster scoped*/, "projectrequests", "builds/details"},
+		OpenshiftStatusGroupName: {"imagestreams/status", "routes/status"},
 
 		QuotaGroupName:         {"limitranges", "resourcequotas", "resourcequotausages"},
-		KubeInternalsGroupName: {"minions", "nodes", "bindings", "events", "namespaces"},
 		KubeExposedGroupName:   {"pods", "replicationcontrollers", "serviceaccounts", "services", "endpoints", "persistentvolumeclaims", "pods/log"},
+		KubeInternalsGroupName: {"minions", "nodes", "bindings", "events", "namespaces", "persistentvolumes", "securitycontextconstraints"},
 		KubeAllGroupName:       {KubeInternalsGroupName, KubeExposedGroupName, QuotaGroupName},
-		KubeStatusGroupName:    {"pods/status", "resourcequotas/status", "namespaces/status"},
+		KubeStatusGroupName:    {"pods/status", "resourcequotas/status", "namespaces/status", "replicationcontrollers/status"},
 
 		OpenshiftEscalatingViewableGroupName: {"oauthauthorizetokens", "oauthaccesstokens"},
 		KubeEscalatingViewableGroupName:      {"secrets"},
@@ -94,38 +107,42 @@ var (
 
 func init() {
 	// set the non-escalating groups
-	GroupsToResources[OpenshiftNonEscalatingViewableGroupName] = ExpandResources(util.NewStringSet(GroupsToResources[OpenshiftAllGroupName]...)).
-		Difference(ExpandResources(util.NewStringSet(GroupsToResources[OpenshiftEscalatingViewableGroupName]...))).List()
+	GroupsToResources[OpenshiftNonEscalatingViewableGroupName] = NormalizeResources(sets.NewString(GroupsToResources[OpenshiftAllGroupName]...)).
+		Difference(NormalizeResources(sets.NewString(GroupsToResources[OpenshiftEscalatingViewableGroupName]...))).List()
 
-	GroupsToResources[KubeNonEscalatingViewableGroupName] = ExpandResources(util.NewStringSet(GroupsToResources[KubeAllGroupName]...)).
-		Difference(ExpandResources(util.NewStringSet(GroupsToResources[KubeEscalatingViewableGroupName]...))).List()
+	GroupsToResources[KubeNonEscalatingViewableGroupName] = NormalizeResources(sets.NewString(GroupsToResources[KubeAllGroupName]...)).
+		Difference(NormalizeResources(sets.NewString(GroupsToResources[KubeEscalatingViewableGroupName]...))).List()
 }
 
 // PolicyRule holds information that describes a policy rule, but does not contain information
 // about who the rule applies to or which namespace the rule applies to.
 type PolicyRule struct {
 	// Verbs is a list of Verbs that apply to ALL the ResourceKinds and AttributeRestrictions contained in this rule.  VerbAll represents all kinds.
-	Verbs util.StringSet
+	Verbs sets.String
 	// AttributeRestrictions will vary depending on what the Authorizer/AuthorizationAttributeBuilder pair supports.
 	// If the Authorizer does not recognize how to handle the AttributeRestrictions, the Authorizer should report an error.
 	AttributeRestrictions kruntime.EmbeddedObject
+	// APIGroups is the name of the APIGroup that contains the resources.  If this field is empty, then both kubernetes and origin API groups are assumed.
+	// That means that if an action is requested against one of the enumerated resources in either the kubernetes or the origin API group, the request
+	// will be allowed
+	APIGroups []string
 	// Resources is a list of resources this rule applies to.  ResourceAll represents all resources.
-	Resources util.StringSet
+	Resources sets.String
 	// ResourceNames is an optional white list of names that the rule applies to.  An empty set means that everything is allowed.
-	ResourceNames util.StringSet
+	ResourceNames sets.String
 	// NonResourceURLs is a set of partial urls that a user should have access to.  *s are allowed, but only as the full, final step in the path
 	// If an action is not a resource API request, then the URL is split on '/' and is checked against the NonResourceURLs to look for a match.
-	NonResourceURLs util.StringSet
+	NonResourceURLs sets.String
 }
 
 // IsPersonalSubjectAccessReview is a marker for PolicyRule.AttributeRestrictions that denotes that subjectaccessreviews on self should be allowed
 type IsPersonalSubjectAccessReview struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 }
 
 // Role is a logical grouping of PolicyRules that can be referenced as a unit by RoleBindings.
 type Role struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
 
 	// Rules holds all the PolicyRules for this Role
@@ -136,13 +153,11 @@ type Role struct {
 // It adds who information via Users and Groups and namespace information by which namespace it exists in.  RoleBindings in a given
 // namespace only have effect in that namespace (excepting the master namespace which has power in all namespaces).
 type RoleBinding struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
 
-	// Users holds all the usernames directly bound to the role
-	Users util.StringSet
-	// Groups holds all the groups directly bound to the role
-	Groups util.StringSet
+	// Subjects hold object references of to authorize with this rule
+	Subjects []kapi.ObjectReference
 
 	// RoleRef can only reference the current namespace and the global namespace
 	// If the RoleRef cannot be resolved, the Authorizer must return an error.
@@ -153,11 +168,11 @@ type RoleBinding struct {
 // Policy is a object that holds all the Roles for a particular namespace.  There is at most
 // one Policy document per namespace.
 type Policy struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
 
 	// LastModified is the last time that any part of the Policy was created, updated, or deleted
-	LastModified util.Time
+	LastModified unversioned.Time
 
 	// Roles holds all the Roles held by this Policy, mapped by Role.Name
 	Roles map[string]*Role
@@ -166,11 +181,11 @@ type Policy struct {
 // PolicyBinding is a object that holds all the RoleBindings for a particular namespace.  There is
 // one PolicyBinding document per referenced Policy namespace
 type PolicyBinding struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
 
 	// LastModified is the last time that any part of the PolicyBinding was created, updated, or deleted
-	LastModified util.Time
+	LastModified unversioned.Time
 
 	// PolicyRef is a reference to the Policy that contains all the Roles that this PolicyBinding's RoleBindings may reference
 	PolicyRef kapi.ObjectReference
@@ -180,34 +195,28 @@ type PolicyBinding struct {
 
 // ResourceAccessReviewResponse describes who can perform the action
 type ResourceAccessReviewResponse struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 
 	// Namespace is the namespace used for the access review
 	Namespace string
 	// Users is the list of users who can perform the action
-	Users util.StringSet
+	Users sets.String
 	// Groups is the list of groups who can perform the action
-	Groups util.StringSet
+	Groups sets.String
 }
 
 // ResourceAccessReview is a means to request a list of which users and groups are authorized to perform the
 // action specified by spec
 type ResourceAccessReview struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 
-	// Verb is one of: get, list, watch, create, update, delete
-	Verb string
-	// Resource is one of the existing resource types
-	Resource string
-	// Content is the actual content of the request for create and update
-	Content kruntime.EmbeddedObject
-	// ResourceName is the name of the resource being requested for a "get" or deleted for a "delete"
-	ResourceName string
+	// Action describes the action being tested
+	Action AuthorizationAttributes
 }
 
 // SubjectAccessReviewResponse describes whether or not a user or group can perform an action
 type SubjectAccessReviewResponse struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 
 	// Namespace is the namespace used for the access review
 	Namespace string
@@ -219,26 +228,53 @@ type SubjectAccessReviewResponse struct {
 
 // SubjectAccessReview is an object for requesting information about whether a user or group can perform an action
 type SubjectAccessReview struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 
+	// Action describes the action being tested
+	Action AuthorizationAttributes
+	// User is optional.  If both User and Groups are empty, the current authenticated user is used.
+	User string
+	// Groups is optional.  Groups is the list of groups to which the User belongs.
+	Groups sets.String
+}
+
+// LocalResourceAccessReview is a means to request a list of which users and groups are authorized to perform the action specified by spec in a particular namespace
+type LocalResourceAccessReview struct {
+	unversioned.TypeMeta
+
+	// Action describes the action being tested
+	Action AuthorizationAttributes
+}
+
+// LocalSubjectAccessReview is an object for requesting information about whether a user or group can perform an action in a particular namespace
+type LocalSubjectAccessReview struct {
+	unversioned.TypeMeta
+
+	// Action describes the action being tested.  The Namespace element is FORCED to the current namespace.
+	Action AuthorizationAttributes
+	// User is optional.  If both User and Groups are empty, the current authenticated user is used.
+	User string
+	// Groups is optional.  Groups is the list of groups to which the User belongs.
+	Groups sets.String
+}
+
+type AuthorizationAttributes struct {
+	// Namespace is the namespace of the action being requested.  Currently, there is no distinction between no namespace and all namespaces
+	Namespace string
 	// Verb is one of: get, list, watch, create, update, delete
 	Verb string
 	// Resource is one of the existing resource types
 	Resource string
-	// User is optional.  If both User and Groups are empty, the current authenticated user is used.
-	User string
-	// Groups is optional.  Groups is the list of groups to which the User belongs.
-	Groups util.StringSet
-	// Content is the actual content of the request for create and update
-	Content kruntime.EmbeddedObject
 	// ResourceName is the name of the resource being requested for a "get" or deleted for a "delete"
 	ResourceName string
+	// Content is the actual content of the request for create and update
+	Content kruntime.EmbeddedObject
 }
 
 // PolicyList is a collection of Policies
 type PolicyList struct {
-	kapi.TypeMeta
-	kapi.ListMeta
+	unversioned.TypeMeta
+	unversioned.ListMeta
 
 	// Items is a list of policies
 	Items []Policy
@@ -246,8 +282,8 @@ type PolicyList struct {
 
 // PolicyBindingList is a collection of PolicyBindings
 type PolicyBindingList struct {
-	kapi.TypeMeta
-	kapi.ListMeta
+	unversioned.TypeMeta
+	unversioned.ListMeta
 
 	// Items is a list of policyBindings
 	Items []PolicyBinding
@@ -255,8 +291,8 @@ type PolicyBindingList struct {
 
 // RoleBindingList is a collection of RoleBindings
 type RoleBindingList struct {
-	kapi.TypeMeta
-	kapi.ListMeta
+	unversioned.TypeMeta
+	unversioned.ListMeta
 
 	// Items is a list of roleBindings
 	Items []RoleBinding
@@ -264,8 +300,8 @@ type RoleBindingList struct {
 
 // RoleList is a collection of Roles
 type RoleList struct {
-	kapi.TypeMeta
-	kapi.ListMeta
+	unversioned.TypeMeta
+	unversioned.ListMeta
 
 	// Items is a list of roles
 	Items []Role
@@ -273,7 +309,7 @@ type RoleList struct {
 
 // ClusterRole is a logical grouping of PolicyRules that can be referenced as a unit by ClusterRoleBindings.
 type ClusterRole struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
 
 	// Rules holds all the PolicyRules for this ClusterRole
@@ -284,13 +320,11 @@ type ClusterRole struct {
 // It adds who information via Users and Groups and namespace information by which namespace it exists in.  ClusterRoleBindings in a given
 // namespace only have effect in that namespace (excepting the master namespace which has power in all namespaces).
 type ClusterRoleBinding struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
 
-	// Users holds all the usernames directly bound to the role
-	Users util.StringSet
-	// GroupNames holds all the groups directly bound to the role
-	Groups util.StringSet
+	// Subjects hold object references of to authorize with this rule
+	Subjects []kapi.ObjectReference
 
 	// RoleRef can only reference the current namespace and the global namespace
 	// If the ClusterRoleRef cannot be resolved, the Authorizer must return an error.
@@ -301,11 +335,11 @@ type ClusterRoleBinding struct {
 // ClusterPolicy is a object that holds all the ClusterRoles for a particular namespace.  There is at most
 // one ClusterPolicy document per namespace.
 type ClusterPolicy struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
 
 	// LastModified is the last time that any part of the ClusterPolicy was created, updated, or deleted
-	LastModified util.Time
+	LastModified unversioned.Time
 
 	// Roles holds all the ClusterRoles held by this ClusterPolicy, mapped by Role.Name
 	Roles map[string]*ClusterRole
@@ -314,11 +348,11 @@ type ClusterPolicy struct {
 // ClusterPolicyBinding is a object that holds all the ClusterRoleBindings for a particular namespace.  There is
 // one ClusterPolicyBinding document per referenced ClusterPolicy namespace
 type ClusterPolicyBinding struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
 
 	// LastModified is the last time that any part of the ClusterPolicyBinding was created, updated, or deleted
-	LastModified util.Time
+	LastModified unversioned.Time
 
 	// ClusterPolicyRef is a reference to the ClusterPolicy that contains all the ClusterRoles that this ClusterPolicyBinding's RoleBindings may reference
 	PolicyRef kapi.ObjectReference
@@ -328,8 +362,8 @@ type ClusterPolicyBinding struct {
 
 // ClusterPolicyList is a collection of ClusterPolicies
 type ClusterPolicyList struct {
-	kapi.TypeMeta
-	kapi.ListMeta
+	unversioned.TypeMeta
+	unversioned.ListMeta
 
 	// Items is a list of ClusterPolicies
 	Items []ClusterPolicy
@@ -337,8 +371,8 @@ type ClusterPolicyList struct {
 
 // ClusterPolicyBindingList is a collection of ClusterPolicyBindings
 type ClusterPolicyBindingList struct {
-	kapi.TypeMeta
-	kapi.ListMeta
+	unversioned.TypeMeta
+	unversioned.ListMeta
 
 	// Items is a list of ClusterPolicyBindings
 	Items []ClusterPolicyBinding
@@ -346,8 +380,8 @@ type ClusterPolicyBindingList struct {
 
 // ClusterRoleBindingList is a collection of ClusterRoleBindings
 type ClusterRoleBindingList struct {
-	kapi.TypeMeta
-	kapi.ListMeta
+	unversioned.TypeMeta
+	unversioned.ListMeta
 
 	// Items is a list of ClusterRoleBindings
 	Items []ClusterRoleBinding
@@ -355,8 +389,8 @@ type ClusterRoleBindingList struct {
 
 // ClusterRoleList is a collection of ClusterRoles
 type ClusterRoleList struct {
-	kapi.TypeMeta
-	kapi.ListMeta
+	unversioned.TypeMeta
+	unversioned.ListMeta
 
 	// Items is a list of ClusterRoles
 	Items []ClusterRole

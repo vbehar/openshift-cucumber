@@ -5,8 +5,9 @@ import (
 	"io"
 	"net/url"
 	"path"
-	"path/filepath"
 	"strings"
+
+	s2igit "github.com/openshift/source-to-image/pkg/scm/git"
 )
 
 // ParseRepository parses a string that may be in the Git format (git@) or URL format
@@ -16,28 +17,19 @@ import (
 // - http, https
 // - file
 // - git
+// - ssh
 func ParseRepository(s string) (*url.URL, error) {
 	uri, err := url.Parse(s)
 	if err != nil {
 		return nil, err
 	}
 
-	if uri.Scheme == "" && !strings.HasPrefix(uri.Path, "git@") {
-		path := s
-		ref := ""
-		segments := strings.SplitN(path, "#", 2)
-		if len(segments) == 2 {
-			path, ref = segments[0], segments[1]
-		}
-		path, err := filepath.Abs(path)
-		if err != nil {
-			return nil, err
-		}
-		uri = &url.URL{
-			Scheme:   "file",
-			Path:     path,
-			Fragment: ref,
-		}
+	// There are some shortcomings with url.Parse when it comes to GIT, namely wrt
+	// the GIT local/file and ssh protocols - it does not handle implied schema (i.e. no <proto>:// prefix)well;
+	// We handle those caveats here
+	err = s2igit.New().MungeNoProtocolURL(s, uri)
+	if err != nil {
+		return nil, err
 	}
 
 	return uri, nil

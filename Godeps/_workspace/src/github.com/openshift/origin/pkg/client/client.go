@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	kclient "k8s.io/kubernetes/pkg/client"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 
 	"github.com/openshift/origin/pkg/api/latest"
 	"github.com/openshift/origin/pkg/version"
@@ -24,6 +24,7 @@ type Interface interface {
 	ImageStreamTagsNamespacer
 	ImageStreamImagesNamespacer
 	DeploymentConfigsNamespacer
+	DeploymentLogsNamespacer
 	RoutesNamespacer
 	HostSubnetsInterface
 	NetNamespacesInterface
@@ -34,11 +35,12 @@ type Interface interface {
 	UserIdentityMappingsInterface
 	ProjectsInterface
 	ProjectRequestsInterface
-	ResourceAccessReviewsNamespacer
-	ClusterResourceAccessReviews
-	SubjectAccessReviewsNamespacer
+	LocalSubjectAccessReviewsImpersonator
 	SubjectAccessReviewsImpersonator
-	ClusterSubjectAccessReviews
+	LocalResourceAccessReviewsNamespacer
+	ResourceAccessReviews
+	SubjectAccessReviews
+	LocalSubjectAccessReviewsNamespacer
 	TemplatesNamespacer
 	TemplateConfigsNamespacer
 	OAuthAccessTokensInterface
@@ -95,6 +97,11 @@ func (c *Client) ImageStreamImages(namespace string) ImageStreamImageInterface {
 // DeploymentConfigs provides a REST client for DeploymentConfig
 func (c *Client) DeploymentConfigs(namespace string) DeploymentConfigInterface {
 	return newDeploymentConfigs(c, namespace)
+}
+
+// DeploymentLogs provides a REST client for DeploymentLog
+func (c *Client) DeploymentLogs(namespace string) DeploymentLogInterface {
+	return newDeploymentLogs(c, namespace)
 }
 
 // Routes provides a REST client for Route
@@ -177,29 +184,34 @@ func (c *Client) RoleBindings(namespace string) RoleBindingInterface {
 	return newRoleBindings(c, namespace)
 }
 
-// ResourceAccessReviews provides a REST client for ResourceAccessReviews
-func (c *Client) ResourceAccessReviews(namespace string) ResourceAccessReviewInterface {
-	return newResourceAccessReviews(c, namespace)
+// LocalResourceAccessReviews provides a REST client for LocalResourceAccessReviews
+func (c *Client) LocalResourceAccessReviews(namespace string) LocalResourceAccessReviewInterface {
+	return newLocalResourceAccessReviews(c, namespace)
 }
 
 // ClusterResourceAccessReviews provides a REST client for ClusterResourceAccessReviews
-func (c *Client) ClusterResourceAccessReviews() ResourceAccessReviewInterface {
-	return newClusterResourceAccessReviews(c)
-}
-
-// SubjectAccessReviews provides a REST client for SubjectAccessReviews
-func (c *Client) SubjectAccessReviews(namespace string) SubjectAccessReviewInterface {
-	return newSubjectAccessReviews(c, namespace, "")
+func (c *Client) ResourceAccessReviews() ResourceAccessReviewInterface {
+	return newResourceAccessReviews(c)
 }
 
 // ImpersonateSubjectAccessReviews provides a REST client for SubjectAccessReviews
-func (c *Client) ImpersonateSubjectAccessReviews(namespace, token string) SubjectAccessReviewInterface {
-	return newSubjectAccessReviews(c, namespace, token)
+func (c *Client) ImpersonateSubjectAccessReviews(token string) SubjectAccessReviewInterface {
+	return newImpersonatingSubjectAccessReviews(c, token)
 }
 
-// ClusterSubjectAccessReviews provides a REST client for SubjectAccessReviews
-func (c *Client) ClusterSubjectAccessReviews() SubjectAccessReviewInterface {
-	return newClusterSubjectAccessReviews(c)
+// ImpersonateLocalSubjectAccessReviews provides a REST client for SubjectAccessReviews
+func (c *Client) ImpersonateLocalSubjectAccessReviews(namespace, token string) LocalSubjectAccessReviewInterface {
+	return newImpersonatingLocalSubjectAccessReviews(c, namespace, token)
+}
+
+// LocalSubjectAccessReviews provides a REST client for LocalSubjectAccessReviews
+func (c *Client) LocalSubjectAccessReviews(namespace string) LocalSubjectAccessReviewInterface {
+	return newLocalSubjectAccessReviews(c, namespace)
+}
+
+// SubjectAccessReviews provides a REST client for SubjectAccessReviews
+func (c *Client) SubjectAccessReviews() SubjectAccessReviewInterface {
+	return newSubjectAccessReviews(c)
 }
 
 // OAuthAccessTokens provides a REST client for OAuthAccessTokens
@@ -252,16 +264,10 @@ func SetOpenShiftDefaults(config *kclient.Config) error {
 	}
 	if config.Version == "" {
 		// Clients default to the preferred code API version
-		// TODO: implement version negotiation (highest version supported by server)
 		config.Version = latest.Version
 	}
 	if config.Prefix == "" {
-		switch config.Version {
-		case "v1beta3":
-			config.Prefix = "/osapi"
-		default:
-			config.Prefix = "/oapi"
-		}
+		config.Prefix = "/oapi"
 	}
 	version := config.Version
 	versionInterfaces, err := latest.InterfacesFor(version)

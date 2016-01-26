@@ -3,12 +3,13 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	kclient "k8s.io/kubernetes/pkg/client"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
 	"github.com/openshift/origin/pkg/build/api"
@@ -24,7 +25,7 @@ This command displays the log for the provided build. If the pod that ran the bu
 will no longer be available. If the build has not yet completed, the build logs will be streamed until the
 build completes or fails.`
 
-	buildLogsExample = `  // Stream logs from container
+	buildLogsExample = `  # Stream logs from container
   $ %[1]s build-logs 566bed879d2d`
 )
 
@@ -32,16 +33,26 @@ build completes or fails.`
 func NewCmdBuildLogs(fullName string, f *clientcmd.Factory, out io.Writer) *cobra.Command {
 	opts := api.BuildLogOptions{}
 	cmd := &cobra.Command{
-		Use:     "build-logs BUILD",
-		Short:   "Show logs from a build",
-		Long:    buildLogsLong,
-		Example: fmt.Sprintf(buildLogsExample, fullName),
+		Use:        "build-logs BUILD",
+		Short:      "Show logs from a build",
+		Long:       buildLogsLong,
+		Example:    fmt.Sprintf(buildLogsExample, fullName),
+		Deprecated: fmt.Sprintf("use %q instead.", LogsRecommendedName),
 		Run: func(cmd *cobra.Command, args []string) {
 			err := RunBuildLogs(fullName, f, out, cmd, opts, args)
 
 			if err, ok := err.(kclient.APIStatus); ok {
 				if msg := err.Status().Message; strings.HasSuffix(msg, buildutil.NoBuildLogsMessage) {
 					fmt.Fprintf(out, msg)
+					os.Exit(1)
+				}
+				if err.Status().Code == http.StatusNotFound {
+					switch err.Status().Details.Kind {
+					case "build":
+						fmt.Fprintf(out, "The build %s could not be found.  Therefore build logs cannot be retrieved.\n", err.Status().Details.Name)
+					case "pod":
+						fmt.Fprintf(out, "The pod %s for build %s could not be found.  Therefore build logs cannot be retrieved.\n", err.Status().Details.Name, args[0])
+					}
 					os.Exit(1)
 				}
 			}

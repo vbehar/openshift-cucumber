@@ -12,9 +12,9 @@ It will force godep to see the linux/windows-specific dependencies.
 */
 
 /*
-
 import (
 	// required for linux build
+	"github.com/coreos/pkg/capnslog"
 	"github.com/docker/libcontainer/cgroups/fs"
 
 	// required for windows build
@@ -24,9 +24,9 @@ import (
 var (
 	// required for linux build
 	_ = &fs.Manager{}
+	_ = capnslog.NewJournaldFormatter()
 
 	// required for windows build
 	_ = &logrus.Entry{}
 )
-
 */

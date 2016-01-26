@@ -56,6 +56,9 @@ func belongsToBuildConfig(config *buildapi.BuildConfig, b *buildapi.Build) bool 
 	if b.Labels[buildapi.BuildConfigLabel] == config.Name {
 		return true
 	}
+	if b.Labels[buildapi.BuildConfigLabelDeprecated] == config.Name {
+		return true
+	}
 	return false
 }
 
