@@ -1,7 +1,8 @@
 package testclient
 
 import (
-	ktestclient "k8s.io/kubernetes/pkg/client/testclient"
+	"k8s.io/kubernetes/pkg/apis/extensions"
+	ktestclient "k8s.io/kubernetes/pkg/client/unversioned/testclient"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/watch"
@@ -58,8 +59,7 @@ func (c *FakeDeploymentConfigs) Delete(name string) error {
 }
 
 func (c *FakeDeploymentConfigs) Watch(label labels.Selector, field fields.Selector, resourceVersion string) (watch.Interface, error) {
-	c.Fake.Invokes(ktestclient.NewWatchAction("deploymentconfigs", c.Namespace, label, field, resourceVersion), nil)
-	return c.Fake.Watch, nil
+	return c.Fake.InvokesWatch(ktestclient.NewWatchAction("deploymentconfigs", c.Namespace, label, field, resourceVersion))
 }
 
 func (c *FakeDeploymentConfigs) Generate(name string) (*deployapi.DeploymentConfig, error) {
@@ -79,4 +79,22 @@ func (c *FakeDeploymentConfigs) Rollback(inObj *deployapi.DeploymentConfigRollba
 	}
 
 	return obj.(*deployapi.DeploymentConfig), err
+}
+
+func (c *FakeDeploymentConfigs) GetScale(name string) (*extensions.Scale, error) {
+	obj, err := c.Fake.Invokes(ktestclient.NewGetAction("deploymentconfigs/scale", c.Namespace, name), &extensions.Scale{})
+	if obj == nil {
+		return nil, err
+	}
+
+	return obj.(*extensions.Scale), err
+}
+
+func (c *FakeDeploymentConfigs) UpdateScale(inObj *extensions.Scale) (*extensions.Scale, error) {
+	obj, err := c.Fake.Invokes(ktestclient.NewUpdateAction("deploymentconfigs/scale", c.Namespace, inObj), inObj)
+	if obj == nil {
+		return nil, err
+	}
+
+	return obj.(*extensions.Scale), err
 }

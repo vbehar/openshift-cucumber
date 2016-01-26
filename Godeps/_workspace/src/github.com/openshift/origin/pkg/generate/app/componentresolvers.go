@@ -39,7 +39,7 @@ type PerfectMatchWeightedResolver []WeightedResolver
 // Resolve resolves the provided input and returns only exact matches
 func (r PerfectMatchWeightedResolver) Resolve(value string) (*ComponentMatch, error) {
 	imperfect := ScoredComponentMatches{}
-	group := []WeightedResolver{}
+	var group WeightedResolvers
 	for i, resolver := range r {
 		if len(group) == 0 || resolver.Weight == group[0].Weight {
 			group = append(group, resolver)
@@ -47,7 +47,7 @@ func (r PerfectMatchWeightedResolver) Resolve(value string) (*ComponentMatch, er
 				continue
 			}
 		}
-		exact, inexact, err := resolveExact(WeightedResolvers(group), value)
+		exact, inexact, err := resolveExact(group, value)
 		switch {
 		case exact != nil:
 			if exact.Score == 0.0 {
@@ -75,6 +75,20 @@ func (r PerfectMatchWeightedResolver) Resolve(value string) (*ComponentMatch, er
 	}
 	switch len(imperfect) {
 	case 0:
+		// If value is a file and there is a TemplateFileSearcher in one of the resolvers
+		// and trying to use it gives an error, use this error instead of ErrNoMatch.
+		// E.g., calling `oc new-app template.json` where template.json is a file
+		// with invalid JSON, it's better to return the JSON syntax error than a more
+		// generic message.
+		if isFile(value) {
+			for _, resolver := range r {
+				if _, ok := resolver.Searcher.(*TemplateFileSearcher); ok {
+					if _, err := resolver.Search(value); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
 		return nil, ErrNoMatch{value: value}
 	case 1:
 		return imperfect[0], nil
@@ -103,10 +117,13 @@ func (r WeightedResolvers) Resolve(value string) (*ComponentMatch, error) {
 			candidates = append(candidates, inexact...)
 		case err != nil:
 			errs = append(errs, err)
+			if matchErr, ok := err.(ErrMultipleMatches); ok {
+				candidates = append(candidates, matchErr.Matches...)
+			}
 		}
 	}
 	if len(errs) != 0 {
-		glog.V(2).Infof("Errors occurred during resolution: %#v", errs)
+		glog.V(2).Infof("Errors occurred during resolution: %v", errs)
 	}
 	switch len(candidates) {
 	case 0:

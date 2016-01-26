@@ -5,10 +5,9 @@ import (
 	"strings"
 
 	"k8s.io/kubernetes/pkg/api"
-	klatest "k8s.io/kubernetes/pkg/api/latest"
 	kmeta "k8s.io/kubernetes/pkg/api/meta"
 	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util"
+	"k8s.io/kubernetes/pkg/util/sets"
 
 	"github.com/golang/glog"
 
@@ -34,7 +33,7 @@ var Versions = []string{"v1", "v1beta3"}
 // the latest supported version.  Use this Codec when writing to
 // disk, a data store that is not dynamically versioned, or in tests.
 // This codec can decode any object that OpenShift is aware of.
-var Codec = v1beta3.Codec
+var Codec = v1.Codec
 
 // accessor is the shared static metadata accessor for the API.
 var accessor = kmeta.NewAccessor()
@@ -76,7 +75,7 @@ func InterfacesFor(version string) (*kmeta.VersionInterfaces, error) {
 }
 
 // originTypes are the hardcoded types defined by the OpenShift API.
-var originTypes = util.StringSet{}
+var originTypes = sets.String{}
 
 // UserResources are the resource names that apply to the primary, user facing resources used by
 // client tools. They are in deletion-first order - dependent resources should be last.
@@ -94,12 +93,15 @@ func OriginKind(kind, apiVersion string) bool {
 }
 
 func init() {
-	kubeMapper := klatest.RESTMapper
+	// this keeps us consistent with old code.  We can decide if we want to expand our RESTMapper to cover
+	// api.RESTMapper, which is different than what you'd get from latest.
+	kubeMapper := api.RESTMapper
 
 	// list of versions we support on the server, in preferred order
 	versions := []string{"v1", "v1beta3"}
 
 	originMapper := kmeta.NewDefaultRESTMapper(
+		"",
 		versions,
 		func(version string) (*kmeta.VersionInterfaces, error) {
 			interfaces, err := InterfacesFor(version)

@@ -97,7 +97,10 @@ func (c *Context) DeleteResourcesBySelector(selector string) error {
 		return err
 	}
 
-	return r.Visit(func(info *resource.Info) error {
+	return r.Visit(func(info *resource.Info, e error) error {
+		if e != nil {
+			return e
+		}
 		reaper, err := factory.Reaper(info.Mapping)
 		if err != nil {
 			if kubectl.IsNoSuchReaperError(err) {
@@ -151,13 +154,12 @@ func (c *Context) ParseResource(fileName string) (*resource.Result, error) {
 // Usage: first parse the resource with Context.ParseResource
 // and then use the visitor pattern on the parsed resource:
 //   r.Visit(CreateResource)
-func CreateResource(info *resource.Info) error {
-	data, err := info.Mapping.Codec.Encode(info.Object)
-	if err != nil {
-		return err
+func CreateResource(info *resource.Info, e error) error {
+	if e != nil {
+		return e
 	}
 
-	obj, err := resource.NewHelper(info.Client, info.Mapping).Create(info.Namespace, true, data)
+	obj, err := resource.NewHelper(info.Client, info.Mapping).Create(info.Namespace, true, info.Object)
 	if err != nil {
 		return err
 	}

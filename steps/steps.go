@@ -7,7 +7,7 @@ import (
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
 
-	kclient "k8s.io/kubernetes/pkg/client"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 
 	"github.com/spf13/pflag"
 )

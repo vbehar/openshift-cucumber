@@ -2,9 +2,10 @@ package testclient
 
 import (
 	"fmt"
+	"io"
 	"net/url"
 
-	ktestclient "k8s.io/kubernetes/pkg/client/testclient"
+	ktestclient "k8s.io/kubernetes/pkg/client/unversioned/testclient"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/watch"
@@ -62,8 +63,7 @@ func (c *FakeBuildConfigs) Delete(name string) error {
 }
 
 func (c *FakeBuildConfigs) Watch(label labels.Selector, field fields.Selector, resourceVersion string) (watch.Interface, error) {
-	c.Fake.Invokes(ktestclient.NewWatchAction("buildconfigs", c.Namespace, label, field, resourceVersion), nil)
-	return c.Fake.Watch, nil
+	return c.Fake.InvokesWatch(ktestclient.NewWatchAction("buildconfigs", c.Namespace, label, field, resourceVersion))
 }
 
 func (c *FakeBuildConfigs) WebHookURL(name string, trigger *buildapi.BuildTriggerPolicy) (*url.URL, error) {
@@ -80,6 +80,17 @@ func (c *FakeBuildConfigs) WebHookURL(name string, trigger *buildapi.BuildTrigge
 func (c *FakeBuildConfigs) Instantiate(request *buildapi.BuildRequest) (result *buildapi.Build, err error) {
 	action := ktestclient.NewCreateAction("buildconfigs", c.Namespace, request)
 	action.Subresource = "instantiate"
+	obj, err := c.Fake.Invokes(action, &buildapi.Build{})
+	if obj == nil {
+		return nil, err
+	}
+
+	return obj.(*buildapi.Build), err
+}
+
+func (c *FakeBuildConfigs) InstantiateBinary(request *buildapi.BinaryBuildRequestOptions, r io.Reader) (result *buildapi.Build, err error) {
+	action := ktestclient.NewCreateAction("buildconfigs", c.Namespace, request)
+	action.Subresource = "instantiatebinary"
 	obj, err := c.Fake.Invokes(action, &buildapi.Build{})
 	if obj == nil {
 		return nil, err

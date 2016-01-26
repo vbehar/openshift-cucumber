@@ -1,11 +1,10 @@
 package v1
 
 import (
-	"fmt"
-
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/conversion"
 
+	oapi "github.com/openshift/origin/pkg/api"
 	newer "github.com/openshift/origin/pkg/build/api"
 	imageapi "github.com/openshift/origin/pkg/image/api"
 )
@@ -114,6 +113,69 @@ func convert_v1_BuildTriggerPolicy_To_api_BuildTriggerPolicy(in *BuildTriggerPol
 	return nil
 }
 
+func convert_api_SourceRevision_To_v1_SourceRevision(in *newer.SourceRevision, out *SourceRevision, s conversion.Scope) error {
+	if err := s.DefaultConvert(in, out, conversion.IgnoreMissingFields); err != nil {
+		return err
+	}
+	out.Type = BuildSourceGit
+	return nil
+}
+
+func convert_v1_SourceRevision_To_api_SourceRevision(in *SourceRevision, out *newer.SourceRevision, s conversion.Scope) error {
+	if err := s.DefaultConvert(in, out, conversion.IgnoreMissingFields); err != nil {
+		return err
+	}
+	return nil
+}
+
+func convert_api_BuildSource_To_v1_BuildSource(in *newer.BuildSource, out *BuildSource, s conversion.Scope) error {
+	if err := s.DefaultConvert(in, out, conversion.IgnoreMissingFields); err != nil {
+		return err
+	}
+	switch {
+	// it is legal for a buildsource to have both a git+dockerfile source, but in v1 that was represented
+	// as type git.
+	case in.Git != nil:
+		out.Type = BuildSourceGit
+	// it is legal for a buildsource to have both a binary+dockerfile source, but in v1 that was represented
+	// as type binary.
+	case in.Binary != nil:
+		out.Type = BuildSourceBinary
+	case in.Dockerfile != nil:
+		out.Type = BuildSourceDockerfile
+	}
+	return nil
+}
+
+func convert_v1_BuildSource_To_api_BuildSource(in *BuildSource, out *newer.BuildSource, s conversion.Scope) error {
+	if err := s.DefaultConvert(in, out, conversion.IgnoreMissingFields); err != nil {
+		return err
+	}
+	return nil
+}
+
+func convert_api_BuildStrategy_To_v1_BuildStrategy(in *newer.BuildStrategy, out *BuildStrategy, s conversion.Scope) error {
+	if err := s.DefaultConvert(in, out, conversion.IgnoreMissingFields); err != nil {
+		return err
+	}
+	switch {
+	case in.SourceStrategy != nil:
+		out.Type = SourceBuildStrategyType
+	case in.DockerStrategy != nil:
+		out.Type = DockerBuildStrategyType
+	case in.CustomStrategy != nil:
+		out.Type = CustomBuildStrategyType
+	}
+	return nil
+}
+
+func convert_v1_BuildStrategy_To_api_BuildStrategy(in *BuildStrategy, out *newer.BuildStrategy, s conversion.Scope) error {
+	if err := s.DefaultConvert(in, out, conversion.IgnoreMissingFields); err != nil {
+		return err
+	}
+	return nil
+}
+
 func init() {
 	err := kapi.Scheme.AddDefaultingFuncs(
 		func(strategy *BuildStrategy) {
@@ -160,37 +222,23 @@ func init() {
 		convert_api_BuildOutput_To_v1_BuildOutput,
 		convert_v1_BuildTriggerPolicy_To_api_BuildTriggerPolicy,
 		convert_api_BuildTriggerPolicy_To_v1_BuildTriggerPolicy,
+		convert_v1_SourceRevision_To_api_SourceRevision,
+		convert_api_SourceRevision_To_v1_SourceRevision,
+		convert_v1_BuildSource_To_api_BuildSource,
+		convert_api_BuildSource_To_v1_BuildSource,
+		convert_v1_BuildStrategy_To_api_BuildStrategy,
+		convert_api_BuildStrategy_To_v1_BuildStrategy,
 	)
 
-	// Add field conversion funcs.
-	err = kapi.Scheme.AddFieldLabelConversionFunc("v1", "Build",
-		func(label, value string) (string, string, error) {
-			switch label {
-			case "name":
-				return "metadata.name", value, nil
-			case "status":
-				return "status", value, nil
-			case "podName":
-				return "podName", value, nil
-			default:
-				return "", "", fmt.Errorf("field label not supported: %s", label)
-			}
-		})
-	if err != nil {
-		// If one of the conversion functions is malformed, detect it immediately.
+	if err := kapi.Scheme.AddFieldLabelConversionFunc("v1", "Build",
+		oapi.GetFieldLabelConversionFunc(newer.BuildToSelectableFields(&newer.Build{}), map[string]string{"name": "metadata.name"}),
+	); err != nil {
 		panic(err)
 	}
-	err = kapi.Scheme.AddFieldLabelConversionFunc("v1", "BuildConfig",
-		func(label, value string) (string, string, error) {
-			switch label {
-			case "name":
-				return "metadata.name", value, nil
-			default:
-				return "", "", fmt.Errorf("field label not supported: %s", label)
-			}
-		})
-	if err != nil {
-		// If one of the conversion functions is malformed, detect it immediately.
+
+	if err := kapi.Scheme.AddFieldLabelConversionFunc("v1", "BuildConfig",
+		oapi.GetFieldLabelConversionFunc(newer.BuildConfigToSelectableFields(&newer.BuildConfig{}), map[string]string{"name": "metadata.name"}),
+	); err != nil {
 		panic(err)
 	}
 }

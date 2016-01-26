@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/docker/docker/pkg/units"
 
@@ -15,12 +16,13 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	kerrs "k8s.io/kubernetes/pkg/api/errors"
 	"k8s.io/kubernetes/pkg/api/meta"
-	kclient "k8s.io/kubernetes/pkg/client"
+	"k8s.io/kubernetes/pkg/api/unversioned"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/fields"
 	kctl "k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util"
+	"k8s.io/kubernetes/pkg/util/sets"
 
 	authorizationapi "github.com/openshift/origin/pkg/authorization/api"
 	buildapi "github.com/openshift/origin/pkg/build/api"
@@ -35,7 +37,6 @@ func describerMap(c *client.Client, kclient kclient.Interface, host string) map[
 	m := map[string]kctl.Describer{
 		"Build":                &BuildDescriber{c, kclient},
 		"BuildConfig":          &BuildConfigDescriber{c, host},
-		"BuildLog":             &BuildLogDescriber{c},
 		"DeploymentConfig":     NewDeploymentConfigDescriber(c, kclient),
 		"Identity":             &IdentityDescriber{c},
 		"Image":                &ImageDescriber{c},
@@ -124,11 +125,6 @@ func (d *BuildDescriber) Describe(namespace, name string) (string, error) {
 		if build.Status.Config != nil {
 			formatString(out, "Build Config", build.Status.Config.Name)
 		}
-		status := bold(build.Status.Phase)
-		if build.Status.Phase == buildapi.BuildPhaseFailed {
-			status += " (" + build.Status.Message + ")"
-		}
-		formatString(out, "Status", status)
 		if build.Status.StartTimestamp != nil {
 			formatString(out, "Started", build.Status.StartTimestamp.Time)
 		}
@@ -140,6 +136,11 @@ func (d *BuildDescriber) Describe(namespace, name string) (string, error) {
 		formatString(out, "Duration", describeBuildDuration(build))
 		formatString(out, "Build Pod", buildutil.GetBuildPodName(build))
 		describeBuildSpec(build.Spec, out)
+		status := bold(build.Status.Phase)
+		if build.Status.Message != "" {
+			status += " (" + build.Status.Message + ")"
+		}
+		formatString(out, "Status", status)
 		kctl.DescribeEvents(events, out)
 
 		return nil
@@ -147,13 +148,13 @@ func (d *BuildDescriber) Describe(namespace, name string) (string, error) {
 }
 
 func describeBuildDuration(build *buildapi.Build) string {
-	t := util.Now().Rfc3339Copy()
+	t := unversioned.Now().Rfc3339Copy()
 	if build.Status.StartTimestamp == nil &&
 		build.Status.CompletionTimestamp != nil &&
 		(build.Status.Phase == buildapi.BuildPhaseCancelled ||
 			build.Status.Phase == buildapi.BuildPhaseFailed ||
 			build.Status.Phase == buildapi.BuildPhaseError) {
-		// time a build waited for its pod before ultimately being canceled before that pod was created
+		// time a build waited for its pod before ultimately being cancelled before that pod was created
 		return fmt.Sprintf("waited for %s", build.Status.CompletionTimestamp.Rfc3339Copy().Time.Sub(build.CreationTimestamp.Rfc3339Copy().Time))
 	} else if build.Status.StartTimestamp == nil && build.Status.Phase != buildapi.BuildPhaseCancelled {
 		// time a new build has been waiting for its pod to be created so it can run
@@ -171,25 +172,18 @@ type BuildConfigDescriber struct {
 	host string
 }
 
-// TODO: remove when internal SourceBuildStrategyType is refactored to "Source"
-func describeStrategy(strategyType buildapi.BuildStrategyType) buildapi.BuildStrategyType {
-	if strategyType == buildapi.SourceBuildStrategyType {
-		strategyType = buildapi.BuildStrategyType("Source")
-	}
-	return strategyType
-}
-
 func describeBuildSpec(p buildapi.BuildSpec, out *tabwriter.Writer) {
-	formatString(out, "Strategy", describeStrategy(p.Strategy.Type))
-	switch p.Strategy.Type {
-	case buildapi.DockerBuildStrategyType:
-		describeDockerStrategy(p.Strategy.DockerStrategy, out)
-	case buildapi.SourceBuildStrategyType:
-		describeSourceStrategy(p.Strategy.SourceStrategy, out)
-	case buildapi.CustomBuildStrategyType:
-		describeCustomStrategy(p.Strategy.CustomStrategy, out)
+	formatString(out, "Strategy", buildapi.StrategyType(p.Strategy))
+	if p.Source.Dockerfile != nil {
+		if len(strings.TrimSpace(*p.Source.Dockerfile)) == 0 {
+			formatString(out, "Dockerfile", "")
+		} else {
+			fmt.Fprintf(out, "Dockerfile:\n")
+			for _, s := range strings.Split(*p.Source.Dockerfile, "\n") {
+				fmt.Fprintf(out, "  %s\n", s)
+			}
+		}
 	}
-	formatString(out, "Source Type", p.Source.Type)
 	if p.Source.Git != nil {
 		formatString(out, "URL", p.Source.Git.URI)
 		if len(p.Source.Git.Ref) > 0 {
@@ -213,6 +207,23 @@ func describeBuildSpec(p buildapi.BuildSpec, out *tabwriter.Writer) {
 			formatString(out, "Message", rev.Message)
 		}
 	}
+	if p.Source.Binary != nil {
+		if len(p.Source.Binary.AsFile) > 0 {
+			formatString(out, "Binary", fmt.Sprintf("provided as file %q on build", p.Source.Binary.AsFile))
+		} else {
+			formatString(out, "Binary", "provided on build")
+		}
+	}
+
+	switch {
+	case p.Strategy.DockerStrategy != nil:
+		describeDockerStrategy(p.Strategy.DockerStrategy, out)
+	case p.Strategy.SourceStrategy != nil:
+		describeSourceStrategy(p.Strategy.SourceStrategy, out)
+	case p.Strategy.CustomStrategy != nil:
+		describeCustomStrategy(p.Strategy.CustomStrategy, out)
+	}
+
 	if p.Output.To != nil {
 		if len(p.Output.To.Namespace) != 0 {
 			formatString(out, "Output to", fmt.Sprintf("%s %s/%s", p.Output.To.Kind, p.Output.To.Namespace, p.Output.To.Name))
@@ -225,7 +236,7 @@ func describeBuildSpec(p buildapi.BuildSpec, out *tabwriter.Writer) {
 		formatString(out, "Push Secret", p.Output.PushSecret.Name)
 	}
 
-	if p.Revision != nil && p.Revision.Type == buildapi.BuildSourceGit && p.Revision.Git != nil {
+	if p.Revision != nil && p.Revision.Git != nil {
 		buildDescriber := &BuildDescriber{}
 
 		formatString(out, "Git Commit", p.Revision.Git.Commit)
@@ -235,14 +246,18 @@ func describeBuildSpec(p buildapi.BuildSpec, out *tabwriter.Writer) {
 			formatString(out, "Revision Message", p.Revision.Git.Message)
 		}
 	}
+
+	if p.CompletionDeadlineSeconds != nil {
+		formatString(out, "Fail Build After", time.Duration(*p.CompletionDeadlineSeconds)*time.Second)
+	}
 }
 
 func describeSourceStrategy(s *buildapi.SourceBuildStrategy, out *tabwriter.Writer) {
 	if len(s.From.Name) != 0 {
 		if len(s.From.Namespace) != 0 {
-			formatString(out, "Image Reference", fmt.Sprintf("%s %s/%s", s.From.Kind, s.From.Namespace, s.From.Name))
+			formatString(out, "From Image", fmt.Sprintf("%s %s/%s", s.From.Kind, s.From.Namespace, s.From.Name))
 		} else {
-			formatString(out, "Image Reference", fmt.Sprintf("%s %s", s.From.Kind, s.From.Name))
+			formatString(out, "From Image", fmt.Sprintf("%s %s", s.From.Kind, s.From.Name))
 		}
 	}
 	if len(s.Scripts) != 0 {
@@ -262,10 +277,13 @@ func describeSourceStrategy(s *buildapi.SourceBuildStrategy, out *tabwriter.Writ
 func describeDockerStrategy(s *buildapi.DockerBuildStrategy, out *tabwriter.Writer) {
 	if s.From != nil && len(s.From.Name) != 0 {
 		if len(s.From.Namespace) != 0 {
-			formatString(out, "Image Reference", fmt.Sprintf("%s %s/%s", s.From.Kind, s.From.Namespace, s.From.Name))
+			formatString(out, "From Image", fmt.Sprintf("%s %s/%s", s.From.Kind, s.From.Namespace, s.From.Name))
 		} else {
-			formatString(out, "Image Reference", fmt.Sprintf("%s %s", s.From.Kind, s.From.Name))
+			formatString(out, "From Image", fmt.Sprintf("%s %s", s.From.Kind, s.From.Name))
 		}
+	}
+	if len(s.DockerfilePath) != 0 {
+		formatString(out, "Dockerfile Path", s.DockerfilePath)
 	}
 	if s.PullSecret != nil {
 		formatString(out, "Pull Secret Name", s.PullSecret.Name)
@@ -306,18 +324,43 @@ func describeCustomStrategy(s *buildapi.CustomBuildStrategy, out *tabwriter.Writ
 
 // DescribeTriggers generates information about the triggers associated with a buildconfig
 func (d *BuildConfigDescriber) DescribeTriggers(bc *buildapi.BuildConfig, out *tabwriter.Writer) {
+	describeBuildTriggers(bc.Spec.Triggers, out)
 	webhooks := webhookURL(bc, d.Interface)
 	for whType, whURL := range webhooks {
 		t := strings.Title(whType)
 		formatString(out, "Webhook "+t, whURL)
 	}
-	for _, trigger := range bc.Spec.Triggers {
-		if trigger.Type != buildapi.ImageChangeBuildTriggerType {
-			continue
-		}
-		fmt.Fprintf(out, fmt.Sprintf("Image Repository Trigger\n"))
-		formatString(out, "- LastTriggeredImageID", trigger.ImageChange.LastTriggeredImageID)
+}
+
+func describeBuildTriggers(triggers []buildapi.BuildTriggerPolicy, w *tabwriter.Writer) {
+	if len(triggers) == 0 {
+		formatString(w, "Triggered by", "<none>")
+		return
 	}
+
+	labels := []string{}
+
+	for _, t := range triggers {
+		switch t.Type {
+		case buildapi.GitHubWebHookBuildTriggerType, buildapi.GenericWebHookBuildTriggerType:
+			continue
+		case buildapi.ConfigChangeBuildTriggerType:
+			labels = append(labels, "Config")
+		case buildapi.ImageChangeBuildTriggerType:
+			if t.ImageChange != nil && t.ImageChange.From != nil && len(t.ImageChange.From.Name) > 0 {
+				labels = append(labels, fmt.Sprintf("Image(%s %s)", t.ImageChange.From.Kind, t.ImageChange.From.Name))
+			} else {
+				labels = append(labels, string(t.Type))
+			}
+		case "":
+			labels = append(labels, "<unknown>")
+		default:
+			labels = append(labels, string(t.Type))
+		}
+	}
+
+	desc := strings.Join(labels, ", ")
+	formatString(w, "Triggered by", desc)
 }
 
 // Describe returns the description of a buildConfig
@@ -327,10 +370,11 @@ func (d *BuildConfigDescriber) Describe(namespace, name string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	buildList, err := d.Builds(namespace).List(labels.SelectorFromSet(labels.Set{buildapi.BuildConfigLabel: name}), fields.Everything())
+	buildList, err := d.Builds(namespace).List(labels.Everything(), fields.Everything())
 	if err != nil {
 		return "", err
 	}
+	buildList.Items = buildapi.FilterBuilds(buildList.Items, buildapi.ByBuildConfigLabelPredicate(name))
 
 	return tabbedString(func(out *tabwriter.Writer) error {
 		formatMeta(out, buildConfig.ObjectMeta)
@@ -344,13 +388,13 @@ func (d *BuildConfigDescriber) Describe(namespace, name string) (string, error) 
 		if len(buildList.Items) == 0 {
 			return nil
 		}
-		fmt.Fprintf(out, "Builds:\n  Name\tStatus\tDuration\tCreation Time\n")
+		fmt.Fprintf(out, "\nBuild\tStatus\tDuration\tCreation Time\n")
 
 		builds := buildList.Items
 		sort.Sort(sort.Reverse(buildapi.BuildSliceByCreationTimestamp(builds)))
 
 		for i, build := range builds {
-			fmt.Fprintf(out, "  %s \t%s \t%v \t%v\n",
+			fmt.Fprintf(out, "%s \t%s \t%v \t%v\n",
 				build.Name,
 				strings.ToLower(string(build.Status.Phase)),
 				describeBuildDuration(&build),
@@ -362,16 +406,6 @@ func (d *BuildConfigDescriber) Describe(namespace, name string) (string, error) 
 		}
 		return nil
 	})
-}
-
-// BuildLogDescriber generates information about a BuildLog
-type BuildLogDescriber struct {
-	client.Interface
-}
-
-// Describe returns the description of a buildLog
-func (d *BuildLogDescriber) Describe(namespace, name string) (string, error) {
-	return fmt.Sprintf("Name: %s/%s, Labels:", namespace, name), nil
 }
 
 // ImageDescriber generates information about a Image
@@ -425,7 +459,7 @@ func describeDockerImage(out *tabwriter.Writer, image *imageapi.DockerConfig) {
 	}
 	formatString(out, "Working Dir", image.WorkingDir)
 	formatString(out, "User", image.User)
-	ports := util.NewStringSet()
+	ports := sets.NewString()
 	for k := range image.ExposedPorts {
 		ports.Insert(k)
 	}
@@ -437,7 +471,7 @@ func describeDockerImage(out *tabwriter.Writer, image *imageapi.DockerConfig) {
 			fmt.Fprintf(out, "\t%s\n", env)
 		}
 	}
-	volumes := util.NewStringSet()
+	volumes := sets.NewString()
 	for k := range image.Volumes {
 		volumes.Insert(k)
 	}
@@ -524,15 +558,18 @@ func (d *RouteDescriber) Describe(namespace, name string) (string, error) {
 
 	return tabbedString(func(out *tabwriter.Writer) error {
 		formatMeta(out, route.ObjectMeta)
-		formatString(out, "Host", route.Host)
-		formatString(out, "Path", route.Path)
-		formatString(out, "Service", route.ServiceName)
+		formatString(out, "Host", route.Spec.Host)
+		formatString(out, "Path", route.Spec.Path)
+		formatString(out, "Service", route.Spec.To.Name)
 
 		tlsTerm := ""
-		if route.TLS != nil {
-			tlsTerm = string(route.TLS.Termination)
+		insecurePolicy := ""
+		if route.Spec.TLS != nil {
+			tlsTerm = string(route.Spec.TLS.Termination)
+			insecurePolicy = string(route.Spec.TLS.InsecureEdgeTerminationPolicy)
 		}
 		formatString(out, "TLS Termination", tlsTerm)
+		formatString(out, "Insecure Policy", insecurePolicy)
 		return nil
 	})
 }
@@ -551,12 +588,12 @@ func (d *ProjectDescriber) Describe(namespace, name string) (string, error) {
 		return "", err
 	}
 	resourceQuotasClient := d.kubeClient.ResourceQuotas(name)
-	resourceQuotaList, err := resourceQuotasClient.List(labels.Everything())
+	resourceQuotaList, err := resourceQuotasClient.List(labels.Everything(), fields.Everything())
 	if err != nil {
 		return "", err
 	}
 	limitRangesClient := d.kubeClient.LimitRanges(name)
-	limitRangeList, err := limitRangesClient.List(labels.Everything())
+	limitRangeList, err := limitRangesClient.List(labels.Everything(), fields.Everything())
 	if err != nil {
 		return "", err
 	}
@@ -574,7 +611,6 @@ func (d *ProjectDescriber) Describe(namespace, name string) (string, error) {
 		formatString(out, "Description", project.Annotations[projectapi.ProjectDescription])
 		formatString(out, "Status", project.Status.Phase)
 		formatString(out, "Node Selector", nodeSelector)
-		fmt.Fprintf(out, "\n")
 		if len(resourceQuotaList.Items) == 0 {
 			formatString(out, "Quota", "")
 		} else {
@@ -600,7 +636,6 @@ func (d *ProjectDescriber) Describe(namespace, name string) (string, error) {
 				}
 			}
 		}
-		fmt.Fprintf(out, "\n")
 		if len(limitRangeList.Items) == 0 {
 			formatString(out, "Resource limits", "")
 		} else {
@@ -672,7 +707,12 @@ func (d *TemplateDescriber) DescribeParameters(params []templateapi.Parameter, o
 	indent := "    "
 	for _, p := range params {
 		formatString(out, indent+"Name", p.Name)
-		formatString(out, indent+"Description", p.Description)
+		if len(p.DisplayName) > 0 {
+			formatString(out, indent+"Display Name", p.DisplayName)
+		}
+		if len(p.Description) > 0 {
+			formatString(out, indent+"Description", p.Description)
+		}
 		formatString(out, indent+"Required", p.Required)
 		if len(p.Generate) == 0 {
 			formatString(out, indent+"Value", p.Value)
@@ -779,7 +819,7 @@ func (d *IdentityDescriber) Describe(namespace, name string) (string, error) {
 			} else if err != nil {
 				nameValue += fmt.Sprintf(" (Error: User lookup failed)")
 			} else {
-				if !util.NewStringSet(resolvedUser.Identities...).Has(name) {
+				if !sets.NewString(resolvedUser.Identities...).Has(name) {
 					nameValue += fmt.Sprintf(" (Error: User identities do not include %s)", name)
 				}
 				if resolvedUser.UID != identity.User.UID {
@@ -922,7 +962,7 @@ func DescribePolicy(policy *authorizationapi.Policy) (string, error) {
 		formatString(out, "Last Modified", policy.LastModified)
 
 		// using .List() here because I always want the sorted order that it provides
-		for _, key := range util.KeySet(reflect.ValueOf(policy.Roles)).List() {
+		for _, key := range sets.KeySet(reflect.ValueOf(policy.Roles)).List() {
 			role := policy.Roles[key]
 			fmt.Fprint(out, key+"\t"+policyRuleHeadings+"\n")
 			for _, rule := range role.Rules {
@@ -934,7 +974,7 @@ func DescribePolicy(policy *authorizationapi.Policy) (string, error) {
 	})
 }
 
-const policyRuleHeadings = "Verbs\tResources\tResource Names\tNon-Resource URLs\tExtension"
+const policyRuleHeadings = "Verbs\tNon-Resource URLs\tExtension\tResource Names\tAPI Groups\tResources"
 
 func describePolicyRule(out *tabwriter.Writer, rule authorizationapi.PolicyRule, indent string) {
 	extensionString := ""
@@ -942,18 +982,20 @@ func describePolicyRule(out *tabwriter.Writer, rule authorizationapi.PolicyRule,
 		extensionString = fmt.Sprintf("%#v", rule.AttributeRestrictions.Object)
 
 		buffer := new(bytes.Buffer)
-		printer := NewHumanReadablePrinter(true, false, false, []string{})
+		printer := NewHumanReadablePrinter(true, false, false, false, []string{})
 		if err := printer.PrintObj(rule.AttributeRestrictions.Object, buffer); err == nil {
 			extensionString = strings.TrimSpace(buffer.String())
 		}
 	}
 
-	fmt.Fprintf(out, indent+"%v\t%v\t%v\t%v\t%v\n",
+	fmt.Fprintf(out, indent+"%v\t%v\t%v\t%v\t%v\t%v\n",
 		rule.Verbs.List(),
-		rule.Resources.List(),
-		rule.ResourceNames.List(),
 		rule.NonResourceURLs.List(),
-		extensionString)
+		extensionString,
+		rule.ResourceNames.List(),
+		rule.APIGroups,
+		rule.Resources.List(),
+	)
 }
 
 // RoleDescriber generates information about a Project
@@ -1003,18 +1045,23 @@ func (d *PolicyBindingDescriber) Describe(namespace, name string) (string, error
 }
 
 func DescribePolicyBinding(policyBinding *authorizationapi.PolicyBinding) (string, error) {
+
 	return tabbedString(func(out *tabwriter.Writer) error {
 		formatMeta(out, policyBinding.ObjectMeta)
 		formatString(out, "Last Modified", policyBinding.LastModified)
 		formatString(out, "Policy", policyBinding.PolicyRef.Namespace)
 
 		// using .List() here because I always want the sorted order that it provides
-		for _, key := range util.KeySet(reflect.ValueOf(policyBinding.RoleBindings)).List() {
+		for _, key := range sets.KeySet(reflect.ValueOf(policyBinding.RoleBindings)).List() {
 			roleBinding := policyBinding.RoleBindings[key]
+			users, groups, sas, others := authorizationapi.SubjectsStrings(roleBinding.Namespace, roleBinding.Subjects)
+
 			formatString(out, "RoleBinding["+key+"]", " ")
 			formatString(out, "\tRole", roleBinding.RoleRef.Name)
-			formatString(out, "\tUsers", roleBinding.Users.List())
-			formatString(out, "\tGroups", roleBinding.Groups.List())
+			formatString(out, "\tUsers", strings.Join(users, ", "))
+			formatString(out, "\tGroups", strings.Join(groups, ", "))
+			formatString(out, "\tServiceAccounts", strings.Join(sas, ", "))
+			formatString(out, "\tSubjects", strings.Join(others, ", "))
 		}
 
 		return nil
@@ -1048,12 +1095,16 @@ func (d *RoleBindingDescriber) Describe(namespace, name string) (string, error) 
 
 // DescribeRoleBinding prints out information about a role binding and its associated role
 func DescribeRoleBinding(roleBinding *authorizationapi.RoleBinding, role *authorizationapi.Role, err error) (string, error) {
+	users, groups, sas, others := authorizationapi.SubjectsStrings(roleBinding.Namespace, roleBinding.Subjects)
+
 	return tabbedString(func(out *tabwriter.Writer) error {
 		formatMeta(out, roleBinding.ObjectMeta)
 
 		formatString(out, "Role", roleBinding.RoleRef.Namespace+"/"+roleBinding.RoleRef.Name)
-		formatString(out, "Users", roleBinding.Users.List())
-		formatString(out, "Groups", roleBinding.Groups.List())
+		formatString(out, "Users", strings.Join(users, ", "))
+		formatString(out, "Groups", strings.Join(groups, ", "))
+		formatString(out, "ServiceAccounts", strings.Join(sas, ", "))
+		formatString(out, "Subjects", strings.Join(others, ", "))
 
 		switch {
 		case err != nil:

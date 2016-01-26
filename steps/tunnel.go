@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"net"
 
-	kclientapi "k8s.io/kubernetes/pkg/client"
-	"k8s.io/kubernetes/pkg/client/portforward"
+	kclientapi "k8s.io/kubernetes/pkg/client/unversioned"
+	"k8s.io/kubernetes/pkg/client/unversioned/portforward"
+	"k8s.io/kubernetes/pkg/client/unversioned/remotecommand"
 )
 
 // Tunnel is a wrapper around an HTTP tunnel
@@ -47,7 +48,12 @@ func (tunnel *Tunnel) StartForwardingToPod(podName string, namespace string, tar
 	port := fmt.Sprintf("%v:%v", tunnel.LocalPort, targetPort)
 	ports := []string{port}
 
-	fw, err := portforward.New(req, clientConfig, ports, tunnel.stopChan)
+	dialer, err := remotecommand.NewExecutor(clientConfig, "POST", req.URL())
+	if err != nil {
+		return err
+	}
+
+	fw, err := portforward.New(dialer, ports, tunnel.stopChan)
 	if err != nil {
 		return err
 	}

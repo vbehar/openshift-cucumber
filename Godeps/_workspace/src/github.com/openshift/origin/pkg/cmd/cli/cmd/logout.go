@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	kclient "k8s.io/kubernetes/pkg/client"
-	kclientcmdapi "k8s.io/kubernetes/pkg/client/clientcmd/api"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	kclientcmdapi "k8s.io/kubernetes/pkg/client/unversioned/clientcmd/api"
 	kcmdconfig "k8s.io/kubernetes/pkg/kubectl/cmd/config"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 
@@ -40,12 +40,12 @@ the local copy of that certificate or the record of your server login.
 After logging out, if you want to log back into the server use '%[1]s'.`
 
 	logoutExample = `
-  // Logout
+  # Logout
   $ %[1]s`
 )
 
 // NewCmdLogout implements the OpenShift cli logout command
-func NewCmdLogout(name, fullName, oscLoginFullCommand string, f *osclientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
+func NewCmdLogout(name, fullName, ocLoginFullCommand string, f *osclientcmd.Factory, reader io.Reader, out io.Writer) *cobra.Command {
 	options := &LogoutOptions{
 		Out: out,
 	}
@@ -53,7 +53,7 @@ func NewCmdLogout(name, fullName, oscLoginFullCommand string, f *osclientcmd.Fac
 	cmds := &cobra.Command{
 		Use:     name,
 		Short:   "End the current server session",
-		Long:    fmt.Sprintf(logoutLong, oscLoginFullCommand),
+		Long:    fmt.Sprintf(logoutLong, ocLoginFullCommand),
 		Example: fmt.Sprintf(logoutExample, fullName),
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := options.Complete(f, cmd, args); err != nil {

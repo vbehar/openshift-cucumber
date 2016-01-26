@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"strings"
 
-	"k8s.io/kubernetes/pkg/client"
-	clientcmdapi "k8s.io/kubernetes/pkg/client/clientcmd/api"
+	client "k8s.io/kubernetes/pkg/client/unversioned"
+	clientcmdapi "k8s.io/kubernetes/pkg/client/unversioned/clientcmd/api"
 	"k8s.io/kubernetes/third_party/golang/netutil"
 
 	"github.com/openshift/origin/pkg/auth/authenticator/request/x509request"
@@ -81,9 +81,9 @@ func GetContextNicknameFromConfig(namespace string, clientCfg *client.Config) (s
 	return namespace + "/" + clusterNick + "/" + userInfo.Name, nil
 }
 
-func GetContextNickname(namespace, clusterNick, userNick string) (string, error) {
+func GetContextNickname(namespace, clusterNick, userNick string) string {
 	tokens := strings.SplitN(userNick, "/", 2)
-	return namespace + "/" + clusterNick + "/" + tokens[0], nil
+	return namespace + "/" + clusterNick + "/" + tokens[0]
 }
 
 // CreateConfig takes a clientCfg and builds a config (kubeconfig style) from it.

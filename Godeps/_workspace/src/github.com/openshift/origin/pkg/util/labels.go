@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 
+	deployapi "github.com/openshift/origin/pkg/deploy/api"
+
 	kmeta "k8s.io/kubernetes/pkg/api/meta"
 	"k8s.io/kubernetes/pkg/labels"
 	"k8s.io/kubernetes/pkg/runtime"
@@ -43,8 +45,15 @@ func AddObjectLabels(obj runtime.Object, labels labels.Set) error {
 			metaLabels = make(map[string]string)
 		}
 
+		switch objType := obj.(type) {
+		case *deployapi.DeploymentConfig:
+			if err := addDeploymentConfigNestedLabels(objType, labels); err != nil {
+				return fmt.Errorf("unable to add nested labels to %s/%s: %v", accessor.Kind(), accessor.Name(), err)
+			}
+		}
+
 		if err := MergeInto(metaLabels, labels, ErrorOnDifferentDstKeyValue); err != nil {
-			return fmt.Errorf("unable to add labels to Template.%s: %v", accessor.Kind(), err)
+			return fmt.Errorf("unable to add labels to %s/%s: %v", accessor.Kind(), accessor.Name(), err)
 		}
 		accessor.SetLabels(metaLabels)
 
@@ -62,7 +71,7 @@ func AddObjectLabels(obj runtime.Object, labels labels.Set) error {
 
 				existing := make(map[string]string)
 				if l, ok := m["labels"]; ok {
-					if found, ok := extractLabels(l); ok {
+					if found, ok := interfaceToStringMap(l); ok {
 						existing = found
 					}
 				}
@@ -78,7 +87,7 @@ func AddObjectLabels(obj runtime.Object, labels labels.Set) error {
 		// TODO: add swagger detection to allow this to happen more effectively
 		if obj, ok := unstruct.Object["labels"]; ok {
 			existing := make(map[string]string)
-			if found, ok := extractLabels(obj); ok {
+			if found, ok := interfaceToStringMap(obj); ok {
 				existing = found
 			}
 			if err := MergeInto(existing, labels, OverwriteExistingDstKey); err != nil {
@@ -92,8 +101,102 @@ func AddObjectLabels(obj runtime.Object, labels labels.Set) error {
 	return nil
 }
 
-// extractLabels extracts a map[string]string from a map[string]interface{}
-func extractLabels(obj interface{}) (map[string]string, bool) {
+// AddObjectAnnotations adds new annotation(s) to a single runtime.Object
+func AddObjectAnnotations(obj runtime.Object, annotations map[string]string) error {
+	if len(annotations) == 0 {
+		return nil
+	}
+
+	accessor, err := kmeta.Accessor(obj)
+
+	if err != nil {
+		if _, ok := obj.(*runtime.Unstructured); !ok {
+			// error out if it's not possible to get an accessor and it's also not an unstructured object
+			return err
+		}
+	} else {
+		metaAnnotations := accessor.Annotations()
+		if metaAnnotations == nil {
+			metaAnnotations = make(map[string]string)
+		}
+
+		switch objType := obj.(type) {
+		case *deployapi.DeploymentConfig:
+			if err := addDeploymentConfigNestedAnnotations(objType, annotations); err != nil {
+				return fmt.Errorf("unable to add nested annotations to %s/%s: %v", accessor.Kind(), accessor.Name(), err)
+			}
+		}
+
+		MergeInto(metaAnnotations, annotations, ErrorOnDifferentDstKeyValue)
+		accessor.SetAnnotations(metaAnnotations)
+
+		return nil
+	}
+
+	// handle unstructured object
+	// TODO: allow meta.Accessor to handle runtime.Unstructured
+	if unstruct, ok := obj.(*runtime.Unstructured); ok && unstruct.Object != nil {
+		// the presence of "metadata" is sufficient for us to apply the rules for Kube-like
+		// objects.
+		// TODO: add swagger detection to allow this to happen more effectively
+		if obj, ok := unstruct.Object["metadata"]; ok {
+			if m, ok := obj.(map[string]interface{}); ok {
+
+				existing := make(map[string]string)
+				if l, ok := m["annotations"]; ok {
+					if found, ok := interfaceToStringMap(l); ok {
+						existing = found
+					}
+				}
+				if err := MergeInto(existing, annotations, OverwriteExistingDstKey); err != nil {
+					return err
+				}
+				m["annotations"] = mapToGeneric(existing)
+			}
+			return nil
+		}
+
+		// only attempt to set root annotations if a root object called annotations exists
+		// TODO: add swagger detection to allow this to happen more effectively
+		if obj, ok := unstruct.Object["annotations"]; ok {
+			existing := make(map[string]string)
+			if found, ok := interfaceToStringMap(obj); ok {
+				existing = found
+			}
+			if err := MergeInto(existing, annotations, OverwriteExistingDstKey); err != nil {
+				return err
+			}
+			unstruct.Object["annotations"] = mapToGeneric(existing)
+			return nil
+		}
+	}
+
+	return nil
+}
+
+// addDeploymentConfigNestedLabels adds new label(s) to a nested labels of a single DeploymentConfig object
+func addDeploymentConfigNestedLabels(obj *deployapi.DeploymentConfig, labels labels.Set) error {
+	if obj.Spec.Template.Labels == nil {
+		obj.Spec.Template.Labels = make(map[string]string)
+	}
+	if err := MergeInto(obj.Spec.Template.Labels, labels, OverwriteExistingDstKey); err != nil {
+		return fmt.Errorf("unable to add labels to Template.DeploymentConfig.Template.ControllerTemplate.Template: %v", err)
+	}
+	return nil
+}
+
+func addDeploymentConfigNestedAnnotations(obj *deployapi.DeploymentConfig, annotations map[string]string) error {
+	if obj.Spec.Template.Annotations == nil {
+		obj.Spec.Template.Annotations = make(map[string]string)
+	}
+	if err := MergeInto(obj.Spec.Template.Annotations, annotations, OverwriteExistingDstKey); err != nil {
+		return fmt.Errorf("unable to add annotations to Template.DeploymentConfig.Template.ControllerTemplate.Template: %v", err)
+	}
+	return nil
+}
+
+// interfaceToStringMap extracts a map[string]string from a map[string]interface{}
+func interfaceToStringMap(obj interface{}) (map[string]string, bool) {
 	if obj == nil {
 		return nil, false
 	}

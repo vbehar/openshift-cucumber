@@ -58,8 +58,8 @@ func init() {
 				return
 			}
 
-			if dc.LatestVersion < requiredDeployments {
-				c.Fail("The Deployment Config '%s' has only %v deployments, instead of the %v deployments required", dcName, dc.LatestVersion, requiredDeployments)
+			if dc.Status.LatestVersion < requiredDeployments {
+				c.Fail("The Deployment Config '%s' has only %v deployments, instead of the %v deployments required", dcName, dc.Status.LatestVersion, requiredDeployments)
 				return
 			}
 		})
@@ -77,7 +77,7 @@ func init() {
 				return
 			}
 
-			latestDeploymentName := fmt.Sprintf("%s-%d", dc.Name, dc.LatestVersion)
+			latestDeploymentName := fmt.Sprintf("%s-%d", dc.Name, dc.Status.LatestVersion)
 
 			success, err := c.IsDeploymentComplete(latestDeploymentName, timeoutDuration)
 			if err != nil {
@@ -181,7 +181,7 @@ func (c *Context) GetReplicationControllers(labelSelector labels.Selector) (*kap
 		return nil, err
 	}
 
-	rcList, err := kclient.ReplicationControllers(namespace).List(labelSelector)
+	rcList, err := kclient.ReplicationControllers(namespace).List(labelSelector, fields.Everything())
 	if err != nil {
 		return nil, err
 	}

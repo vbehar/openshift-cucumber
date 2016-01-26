@@ -10,11 +10,11 @@ import (
 	kapi "k8s.io/kubernetes/pkg/api"
 	"k8s.io/kubernetes/pkg/api/errors"
 	"k8s.io/kubernetes/pkg/api/meta"
+	"k8s.io/kubernetes/pkg/api/unversioned"
 	"k8s.io/kubernetes/pkg/kubectl"
 	kcmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
 	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util"
 
 	"github.com/openshift/origin/pkg/cmd/cli/describe"
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
@@ -33,19 +33,22 @@ as well as metadata describing the template.
 The output of the process command is always a list of one or more resources. You may pipe the
 output to the create command over STDIN (using the '-f -' option) or redirect it to a file.`
 
-	processExample = `  // Convert template.json file into resource list and pass to create
+	processExample = `  # Convert template.json file into resource list and pass to create
   $ %[1]s process -f template.json | %[1]s create -f -
 
-  // Process template while passing a user-defined label
+  # Process template while passing a user-defined label
   $ %[1]s process -f template.json -l name=mytemplate
 
-  // Convert stored template into resource list
+  # Convert stored template into resource list
   $ %[1]s process foo
 
-  // Convert template.json into resource list
+  # Convert template stored in different namespace into a resource list
+  $ %[1]s process openshift//foo
+
+  # Convert template.json into resource list
   $ cat template.json | %[1]s process -f -
 
-  // Combine multiple templates into single resource list
+  # Combine multiple templates into single resource list
   $ cat template.json second_template.json | %[1]s process -f -`
 )
 
@@ -61,28 +64,30 @@ func NewCmdProcess(fullName string, f *clientcmd.Factory, out io.Writer) *cobra.
 			kcmdutil.CheckErr(err)
 		},
 	}
-
 	cmd.Flags().StringP("filename", "f", "", "Filename or URL to file to read a template")
-	cmd.Flags().StringP("value", "v", "", "Specify a list of key-value pairs (eg. -v FOO=BAR,BAR=FOO) to set/override parameter values")
+	cmd.Flags().StringSliceP("value", "v", nil, "Specify a list of key-value pairs (eg. -v FOO=BAR,BAR=FOO) to set/override parameter values")
 	cmd.Flags().BoolP("parameters", "", false, "Do not process but only print available parameters")
 	cmd.Flags().StringP("labels", "l", "", "Label to set in all resources for this template")
 
-	cmd.Flags().StringP("output", "o", "json", "Output format. One of: describe|json|yaml|template|templatefile.")
+	cmd.Flags().StringP("output", "o", "json", "Output format. One of: describe|json|yaml|name|template|templatefile.")
 	cmd.Flags().Bool("raw", false, "If true output the processed template instead of the template's objects. Implied by -o describe")
 	cmd.Flags().String("output-version", "", "Output the formatted object with the given version (default api-version).")
 	cmd.Flags().StringP("template", "t", "", "Template string or path to template file to use when -o=template or -o=templatefile.  The template format is golang templates [http://golang.org/pkg/text/template/#pkg-overview]")
+
+	cmd.MarkFlagFilename("filename", "yaml", "yml", "json")
+
 	return cmd
 }
 
 // RunProject contains all the necessary functionality for the OpenShift cli process command
 func RunProcess(f *clientcmd.Factory, out io.Writer, cmd *cobra.Command, args []string) error {
-	storedTemplate := ""
+	templateName := ""
 	if len(args) > 0 {
-		storedTemplate = args[0]
+		templateName = args[0]
 	}
 
 	filename := kcmdutil.GetFlagString(cmd, "filename")
-	if len(storedTemplate) == 0 && len(filename) == 0 {
+	if len(templateName) == 0 && len(filename) == 0 {
 		return kcmdutil.UsageError(cmd, "Must pass a filename or name of stored template")
 	}
 
@@ -117,17 +122,32 @@ func RunProcess(f *clientcmd.Factory, out io.Writer, cmd *cobra.Command, args []
 		return err
 	}
 
-	// When storedTemplate is not empty, then we fetch the template from the
+	// When templateName is not empty, then we fetch the template from the
 	// server, otherwise we require to set the `-f` parameter.
-	if len(storedTemplate) > 0 {
-		templateObj, err := client.Templates(namespace).Get(storedTemplate)
+	if len(templateName) > 0 {
+		var (
+			storedTemplate, rs string
+			sourceNamespace    string
+			ok                 bool
+		)
+		sourceNamespace, rs, storedTemplate, ok = parseNamespaceResourceName(templateName, namespace)
+		if !ok {
+			return fmt.Errorf("invalid argument %q", templateName)
+		}
+		if len(rs) > 0 && (rs != "template" && rs != "templates") {
+			return fmt.Errorf("unable to process invalid resource %q", rs)
+		}
+		if len(storedTemplate) == 0 {
+			return fmt.Errorf("invalid value syntax %q", templateName)
+		}
+		templateObj, err := client.Templates(sourceNamespace).Get(storedTemplate)
 		if err != nil {
 			if errors.IsNotFound(err) {
 				return fmt.Errorf("template %q could not be found", storedTemplate)
 			}
 			return err
 		}
-		templateObj.CreationTimestamp = util.Now()
+		templateObj.CreationTimestamp = unversioned.Now()
 		infos = append(infos, &resource.Info{Object: templateObj})
 	} else {
 		infos, err = resource.NewBuilder(mapper, typer, f.ClientMapperForCommand()).
@@ -146,8 +166,8 @@ func RunProcess(f *clientcmd.Factory, out io.Writer, cmd *cobra.Command, args []
 		obj, ok := infos[i].Object.(*api.Template)
 		if !ok {
 			sourceName := filename
-			if len(storedTemplate) > 0 {
-				sourceName = namespace + "/" + storedTemplate
+			if len(templateName) > 0 {
+				sourceName = namespace + "/" + templateName
 			}
 			fmt.Fprintf(cmd.Out(), "unable to parse %q, not a valid Template but %s\n", sourceName, reflect.TypeOf(infos[i].Object))
 			continue
@@ -229,15 +249,14 @@ func RunProcess(f *clientcmd.Factory, out io.Writer, cmd *cobra.Command, args []
 	}
 
 	return p.PrintObj(&kapi.List{
-		ListMeta: kapi.ListMeta{},
+		ListMeta: unversioned.ListMeta{},
 		Items:    objects,
 	}, out)
 }
 
 // injectUserVars injects user specified variables into the Template
 func injectUserVars(cmd *cobra.Command, t *api.Template) {
-	values := util.StringList{}
-	values.Set(kcmdutil.GetFlagString(cmd, "value"))
+	values := kcmdutil.GetFlagStringSlice(cmd, "value")
 	for _, keypair := range values {
 		p := strings.SplitN(keypair, "=", 2)
 		if len(p) != 2 {

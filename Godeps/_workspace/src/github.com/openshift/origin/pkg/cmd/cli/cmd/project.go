@@ -7,8 +7,8 @@ import (
 	"io"
 
 	kapierrors "k8s.io/kubernetes/pkg/api/errors"
-	kclient "k8s.io/kubernetes/pkg/client"
-	clientcmdapi "k8s.io/kubernetes/pkg/client/clientcmd/api"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
+	clientcmdapi "k8s.io/kubernetes/pkg/client/unversioned/clientcmd/api"
 	"k8s.io/kubernetes/pkg/fields"
 	kubecmdconfig "k8s.io/kubernetes/pkg/kubectl/cmd/config"
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
@@ -32,6 +32,9 @@ type ProjectOptions struct {
 	ProjectName  string
 	ProjectOnly  bool
 	DisplayShort bool
+
+	// SkipAccessValidation means that if a specific name is requested, don't bother checking for access to the project
+	SkipAccessValidation bool
 }
 
 const (
@@ -48,10 +51,10 @@ name, this command will accept that context name instead.
 For advanced configuration, or to manage the contents of your config file, use the 'config'
 command.`
 
-	projectExample = `  // Switch to 'myapp' project
+	projectExample = `  # Switch to 'myapp' project
   $ %[1]s myapp
 
-  // Display the project currently in use
+  # Display the project currently in use
   $ %[1]s`
 )
 
@@ -64,6 +67,7 @@ func NewCmdProject(fullName string, f *clientcmd.Factory, out io.Writer) *cobra.
 		Short:   "Switch to another project",
 		Long:    projectLong,
 		Example: fmt.Sprintf(projectExample, fullName),
+		Aliases: []string{"projects"},
 		Run: func(cmd *cobra.Command, args []string) {
 			options.PathOptions = cliconfig.NewPathOptions(cmd)
 
@@ -142,14 +146,15 @@ func (o ProjectOptions) RunProject() error {
 				return err
 			}
 
-			if config.CurrentContext != currentProject {
-				if len(currentProject) > 0 {
-					fmt.Fprintf(out, "Using project %q from context named %q on server %q.\n", currentProject, config.CurrentContext, clientCfg.Host)
-				} else {
-					fmt.Fprintf(out, "Using context named %q on server %q.\n", config.CurrentContext, clientCfg.Host)
-				}
-			} else {
+			defaultContextName := cliconfig.GetContextNickname(currentContext.Namespace, currentContext.Cluster, currentContext.AuthInfo)
+
+			// if they specified a project name and got a generated context, then only show the information they care about.  They won't recognize
+			// a context name they didn't choose
+			if config.CurrentContext == defaultContextName {
 				fmt.Fprintf(out, "Using project %q on server %q.\n", currentProject, clientCfg.Host)
+
+			} else {
+				fmt.Fprintf(out, "Using project %q from context named %q on server %q.\n", currentProject, config.CurrentContext, clientCfg.Host)
 			}
 
 		} else {
@@ -166,7 +171,6 @@ func (o ProjectOptions) RunProject() error {
 
 	contextInUse := ""
 	namespaceInUse := ""
-	contextNameIsGenerated := false
 
 	// Check if argument is an existing context, if so just set it as the context in use.
 	// If not a context then we will try to handle it as a project.
@@ -177,40 +181,43 @@ func (o ProjectOptions) RunProject() error {
 		config.CurrentContext = argument
 
 	} else {
-		project, err := o.Client.Projects().Get(argument)
-		if err != nil {
-			if isNotFound, isForbidden := kapierrors.IsNotFound(err), clientcmd.IsForbidden(err); isNotFound || isForbidden {
-				var msg string
-				if isForbidden {
-					msg = fmt.Sprintf("You are not a member of project %q.", argument)
-				} else {
-					msg = fmt.Sprintf("A project named %q does not exist on %q.", argument, clientCfg.Host)
-				}
+		if !o.SkipAccessValidation {
+			_, err := o.Client.Projects().Get(argument)
+			if err != nil {
+				if isNotFound, isForbidden := kapierrors.IsNotFound(err), clientcmd.IsForbidden(err); isNotFound || isForbidden {
+					var msg string
+					if isForbidden {
+						msg = fmt.Sprintf("You are not a member of project %q.", argument)
+					} else {
+						msg = fmt.Sprintf("A project named %q does not exist on %q.", argument, clientCfg.Host)
+					}
 
-				projects, err := getProjects(o.Client)
-				if err == nil {
-					switch len(projects) {
-					case 0:
-						msg += "\nYou are not a member of any projects. You can request a project to be created with the 'new-project' command."
-					case 1:
-						msg += fmt.Sprintf("\nYou have one project on this server: %s", api.DisplayNameAndNameForProject(&projects[0]))
-					default:
-						msg += "\nYour projects are:"
-						for _, project := range projects {
-							msg += fmt.Sprintf("\n* %s", api.DisplayNameAndNameForProject(&project))
+					projects, err := getProjects(o.Client)
+					if err == nil {
+						switch len(projects) {
+						case 0:
+							msg += "\nYou are not a member of any projects. You can request a project to be created with the 'new-project' command."
+						case 1:
+							msg += fmt.Sprintf("\nYou have one project on this server: %s", api.DisplayNameAndNameForProject(&projects[0]))
+						default:
+							msg += "\nYour projects are:"
+							for _, project := range projects {
+								msg += fmt.Sprintf("\n* %s", api.DisplayNameAndNameForProject(&project))
+							}
 						}
 					}
-				}
 
-				if hasMultipleServers(config) {
-					msg += "\nTo see projects on another server, pass '--server=<server>'."
+					if hasMultipleServers(config) {
+						msg += "\nTo see projects on another server, pass '--server=<server>'."
+					}
+					return errors.New(msg)
 				}
-				return errors.New(msg)
+				return err
 			}
-			return err
 		}
+		projectName := argument
 
-		kubeconfig, err := cliconfig.CreateConfig(project.Name, o.ClientConfig)
+		kubeconfig, err := cliconfig.CreateConfig(projectName, o.ClientConfig)
 		if err != nil {
 			return err
 		}
@@ -221,9 +228,8 @@ func (o ProjectOptions) RunProject() error {
 		}
 		config = *merged
 
-		namespaceInUse = project.Name
+		namespaceInUse = projectName
 		contextInUse = merged.CurrentContext
-		contextNameIsGenerated = true
 	}
 
 	if err := kubecmdconfig.ModifyConfig(o.PathOptions, config, true); err != nil {
@@ -235,15 +241,26 @@ func (o ProjectOptions) RunProject() error {
 		return nil
 	}
 
-	if contextInUse != namespaceInUse && !contextNameIsGenerated {
-		if len(namespaceInUse) > 0 {
-			fmt.Fprintf(out, "Now using project %q from context named %q on server %q.\n", namespaceInUse, contextInUse, clientCfg.Host)
-		} else {
-			fmt.Fprintf(out, "Now using context named %q on server %q.\n", contextInUse, clientCfg.Host)
-		}
-	} else {
+	// calculate what name we'd generate for the context.  If the context has the same name, don't drop it into the output, because the user won't
+	// recognize the name since they didn't choose it.
+	defaultContextName := cliconfig.GetContextNickname(namespaceInUse, config.Contexts[contextInUse].Cluster, config.Contexts[contextInUse].AuthInfo)
+
+	switch {
+	// if there is no namespace, then the only information we can provide is the context and server
+	case (len(namespaceInUse) == 0):
+		fmt.Fprintf(out, "Now using context named %q on server %q.\n", contextInUse, clientCfg.Host)
+
+	// if they specified a project name and got a generated context, then only show the information they care about.  They won't recognize
+	// a context name they didn't choose
+	case (argument == namespaceInUse) && (contextInUse == defaultContextName):
 		fmt.Fprintf(out, "Now using project %q on server %q.\n", namespaceInUse, clientCfg.Host)
+
+	// in all other cases, display all information
+	default:
+		fmt.Fprintf(out, "Now using project %q from context named %q on server %q.\n", namespaceInUse, contextInUse, clientCfg.Host)
+
 	}
+
 	return nil
 }
 

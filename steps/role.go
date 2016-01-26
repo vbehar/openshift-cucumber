@@ -47,7 +47,13 @@ func (c *Context) checkUserHasRole(userName string, roleName string) {
 		userName = user.Name
 	}
 
-	if !rb.Users.Has(userName) {
+	namespace, err := c.Namespace()
+	if err != nil {
+		c.Fail("Could not find Namespace")
+		return
+	}
+	users, _, _, _ := authapi.SubjectsStrings(namespace, rb.Subjects)
+	if !contains(userName, users) {
 		c.Fail("The user '%s' does not have the '%s' role !", userName, roleName)
 	}
 }
@@ -63,8 +69,13 @@ func (c *Context) checkGroupHasRole(groupName string, roleName string) {
 		c.Fail("Could not find a Role Binding for role '%s'", roleName)
 		return
 	}
-
-	if !rb.Groups.Has(groupName) {
+	namespace, err := c.Namespace()
+	if err != nil {
+		c.Fail("Could not find Namespace")
+		return
+	}
+	_, groups, _, _ := authapi.SubjectsStrings(namespace, rb.Subjects)
+	if !contains(groupName, groups) {
 		c.Fail("The group '%s' does not have the '%s' role !", groupName, roleName)
 	}
 }
@@ -92,4 +103,13 @@ func (c *Context) GetRoleBindingForRole(roleName string) (*authapi.RoleBinding, 
 	}
 
 	return nil, nil
+}
+
+func contains(value string, elts []string) bool {
+	for _, elt := range elts {
+		if elt == value {
+			return true
+		}
+	}
+	return false
 }

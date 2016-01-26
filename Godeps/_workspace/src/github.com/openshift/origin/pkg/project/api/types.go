@@ -2,12 +2,13 @@ package api
 
 import (
 	kapi "k8s.io/kubernetes/pkg/api"
+	"k8s.io/kubernetes/pkg/api/unversioned"
 )
 
 // ProjectList is a list of Project objects.
 type ProjectList struct {
-	kapi.TypeMeta
-	kapi.ListMeta
+	unversioned.TypeMeta
+	unversioned.ListMeta
 	Items []Project
 }
 
@@ -29,7 +30,7 @@ type ProjectStatus struct {
 
 // Project is a logical top-level container for a set of origin resources
 type Project struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
 
 	Spec   ProjectSpec
@@ -37,7 +38,7 @@ type Project struct {
 }
 
 type ProjectRequest struct {
-	kapi.TypeMeta
+	unversioned.TypeMeta
 	kapi.ObjectMeta
 	DisplayName string
 	Description string
@@ -52,4 +53,7 @@ const (
 	// ProjectNodeSelector is an annotation that holds the node selector;
 	// the node selector annotation determines which nodes will have pods from this project scheduled to them
 	ProjectNodeSelector = "openshift.io/node-selector"
+	// ProjectRequester is the username that requested a given project.  Its not guaranteed to be present,
+	// but it is set by the default project template.
+	ProjectRequester = "openshift.io/requester"
 )

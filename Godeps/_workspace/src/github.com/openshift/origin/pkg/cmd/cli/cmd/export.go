@@ -12,7 +12,6 @@ import (
 	cmdutil "k8s.io/kubernetes/pkg/kubectl/cmd/util"
 	"k8s.io/kubernetes/pkg/kubectl/resource"
 	"k8s.io/kubernetes/pkg/runtime"
-	"k8s.io/kubernetes/pkg/util"
 	utilerrors "k8s.io/kubernetes/pkg/util/errors"
 
 	"github.com/openshift/origin/pkg/cmd/util/clientcmd"
@@ -37,22 +36,22 @@ versions.
 Another use case for export is to create reusable templates for applications. Pass --as-template
 to generate the API structure for a template to which you can add parameters and object labels.`
 
-	exportExample = `  // export the services and deployment configurations labeled name=test
+	exportExample = `  # export the services and deployment configurations labeled name=test
   %[1]s export svc,dc -l name=test
 
-  // export all services to a template
-  %[1]s export service --all --as-template=test
+  # export all services to a template
+  %[1]s export service --as-template=test
 
-  // export to JSON
-  %[1]s export service --all -o json
+  # export to JSON
+  %[1]s export service -o json
 
-  // convert a file on disk to the latest API version (in YAML, the default)
+  # convert a file on disk to the latest API version (in YAML, the default)
   %[1]s export -f a_v1beta3_service.json --output-version=v1 --exact`
 )
 
 func NewCmdExport(fullName string, f *clientcmd.Factory, in io.Reader, out io.Writer) *cobra.Command {
 	exporter := &defaultExporter{}
-	var filenames util.StringList
+	var filenames []string
 	cmd := &cobra.Command{
 		Use:     "export RESOURCE/NAME ... [options]",
 		Short:   "Export resources so they can be used elsewhere",
@@ -70,15 +69,18 @@ func NewCmdExport(fullName string, f *clientcmd.Factory, in io.Reader, out io.Wr
 	cmd.Flags().Bool("exact", false, "Preserve fields that may be cluster specific, such as service portalIPs or generated names")
 	cmd.Flags().Bool("raw", false, "If true, do not alter the resources in any way after they are loaded.")
 	cmd.Flags().StringP("selector", "l", "", "Selector (label query) to filter on")
-	cmd.Flags().Bool("all", false, "Select all resources in the namespace of the specified resource types")
-	cmd.Flags().VarP(&filenames, "filename", "f", "Filename, directory, or URL to file to use to edit the resource.")
+	cmd.Flags().Bool("all-namespaces", false, "If present, list the requested object(s) across all namespaces. Namespace in current context is ignored even if specified with --namespace.")
+	cmd.Flags().StringSliceVarP(&filenames, "filename", "f", filenames, "Filename, directory, or URL to file to use to edit the resource.")
+
+	cmd.Flags().Bool("all", true, "DEPRECATED: all is ignored, specifying a resource without a name selects all the instances of that resource")
+	cmd.Flags().MarkDeprecated("all", "all is ignored because specifying a resource without a name selects all the instances of that resource")
 	cmdutil.AddPrinterFlags(cmd)
 	return cmd
 }
 
-func RunExport(f *clientcmd.Factory, exporter Exporter, in io.Reader, out io.Writer, cmd *cobra.Command, args []string, filenames util.StringList) error {
+func RunExport(f *clientcmd.Factory, exporter Exporter, in io.Reader, out io.Writer, cmd *cobra.Command, args []string, filenames []string) error {
 	selector := cmdutil.GetFlagString(cmd, "selector")
-	all := cmdutil.GetFlagBool(cmd, "all")
+	allNamespaces := cmdutil.GetFlagBool(cmd, "all-namespaces")
 	exact := cmdutil.GetFlagBool(cmd, "exact")
 	asTemplate := cmdutil.GetFlagString(cmd, "as-template")
 	raw := cmdutil.GetFlagBool(cmd, "raw")
@@ -99,10 +101,10 @@ func RunExport(f *clientcmd.Factory, exporter Exporter, in io.Reader, out io.Wri
 
 	mapper, typer := f.Object()
 	b := resource.NewBuilder(mapper, typer, f.ClientMapperForCommand()).
-		NamespaceParam(cmdNamespace).DefaultNamespace().
+		NamespaceParam(cmdNamespace).DefaultNamespace().AllNamespaces(allNamespaces).
 		FilenameParam(explicit, filenames...).
 		SelectorParam(selector).
-		ResourceTypeOrNameArgs(all, args...).
+		ResourceTypeOrNameArgs(true, args...).
 		Flatten()
 
 	one := false

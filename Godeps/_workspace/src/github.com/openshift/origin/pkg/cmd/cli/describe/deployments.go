@@ -12,7 +12,7 @@ import (
 
 	kapi "k8s.io/kubernetes/pkg/api"
 	kerrors "k8s.io/kubernetes/pkg/api/errors"
-	kclient "k8s.io/kubernetes/pkg/client"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/fields"
 	kctl "k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/labels"
@@ -23,6 +23,7 @@ import (
 	deployedges "github.com/openshift/origin/pkg/deploy/graph"
 	deploygraph "github.com/openshift/origin/pkg/deploy/graph/nodes"
 	deployutil "github.com/openshift/origin/pkg/deploy/util"
+	imageapi "github.com/openshift/origin/pkg/image/api"
 )
 
 // DeploymentConfigDescriber generates information about a DeploymentConfig
@@ -101,7 +102,7 @@ func NewDeploymentConfigDescriber(client client.Interface, kclient kclient.Inter
 				return kclient.ReplicationControllers(namespace).Get(name)
 			},
 			listDeploymentsFunc: func(namespace string, selector labels.Selector) (*kapi.ReplicationControllerList, error) {
-				return kclient.ReplicationControllers(namespace).List(selector)
+				return kclient.ReplicationControllers(namespace).List(selector, fields.Everything())
 			},
 			listPodsFunc: func(namespace string, selector labels.Selector) (*kapi.PodList, error) {
 				return kclient.Pods(namespace).List(selector, fields.Everything())
@@ -127,18 +128,20 @@ func (d *DeploymentConfigDescriber) Describe(namespace, name string) (string, er
 	return tabbedString(func(out *tabwriter.Writer) error {
 		formatMeta(out, deploymentConfig.ObjectMeta)
 
-		if deploymentConfig.LatestVersion == 0 {
+		if deploymentConfig.Status.LatestVersion == 0 {
 			formatString(out, "Latest Version", "Not deployed")
 		} else {
-			formatString(out, "Latest Version", strconv.Itoa(deploymentConfig.LatestVersion))
+			formatString(out, "Latest Version", strconv.Itoa(deploymentConfig.Status.LatestVersion))
 		}
 
-		printTriggers(deploymentConfig.Triggers, out)
+		printTriggers(deploymentConfig.Spec.Triggers, out)
 
-		formatString(out, "Strategy", deploymentConfig.Template.Strategy.Type)
-		printStrategy(deploymentConfig.Template.Strategy, out)
-		printReplicationControllerSpec(deploymentConfig.Template.ControllerTemplate, out)
-
+		formatString(out, "Strategy", deploymentConfig.Spec.Strategy.Type)
+		printStrategy(deploymentConfig.Spec.Strategy, out)
+		printDeploymentConfigSpec(deploymentConfig.Spec, out)
+		if deploymentConfig.Status.Details != nil && len(deploymentConfig.Status.Details.Message) > 0 {
+			fmt.Fprintf(out, "Warning:\t%s\n", deploymentConfig.Status.Details.Message)
+		}
 		deploymentName := deployutil.LatestDeploymentNameForConfig(deploymentConfig)
 		deployment, err := d.client.getDeployment(namespace, deploymentName)
 		if err != nil {
@@ -210,7 +213,7 @@ func printStrategy(strategy deployapi.DeploymentStrategy, w *tabwriter.Writer) {
 
 func printHook(prefix string, hook *deployapi.LifecycleHook, w io.Writer) {
 	if hook.ExecNewPod != nil {
-		fmt.Fprintf(w, "\t  %s hook (pod type, failure policy: %s)\n", prefix, hook.FailurePolicy)
+		fmt.Fprintf(w, "\t  %s hook (pod type, failure policy: %s):\n", prefix, hook.FailurePolicy)
 		fmt.Fprintf(w, "\t    Container:\t%s\n", hook.ExecNewPod.ContainerName)
 		fmt.Fprintf(w, "\t    Command:\t%v\n", strings.Join(hook.ExecNewPod.Command, " "))
 		fmt.Fprintf(w, "\t    Env:\t%s\n", formatLabels(convertEnv(hook.ExecNewPod.Env)))
@@ -230,10 +233,9 @@ func printTriggers(triggers []deployapi.DeploymentTriggerPolicy, w *tabwriter.Wr
 		case deployapi.DeploymentTriggerOnConfigChange:
 			labels = append(labels, "Config")
 		case deployapi.DeploymentTriggerOnImageChange:
-			if len(t.ImageChangeParams.RepositoryName) > 0 {
-				labels = append(labels, fmt.Sprintf("Image(%s@%s, auto=%v)", t.ImageChangeParams.RepositoryName, t.ImageChangeParams.Tag, t.ImageChangeParams.Automatic))
-			} else if len(t.ImageChangeParams.From.Name) > 0 {
-				labels = append(labels, fmt.Sprintf("Image(%s@%s, auto=%v)", t.ImageChangeParams.From.Name, t.ImageChangeParams.Tag, t.ImageChangeParams.Automatic))
+			if len(t.ImageChangeParams.From.Name) > 0 {
+				name, tag, _ := imageapi.SplitImageStreamTag(t.ImageChangeParams.From.Name)
+				labels = append(labels, fmt.Sprintf("Image(%s@%s, auto=%v)", name, tag, t.ImageChangeParams.Automatic))
 			}
 		}
 	}
@@ -242,7 +244,7 @@ func printTriggers(triggers []deployapi.DeploymentTriggerPolicy, w *tabwriter.Wr
 	formatString(w, "Triggers", desc)
 }
 
-func printReplicationControllerSpec(spec kapi.ReplicationControllerSpec, w io.Writer) error {
+func printDeploymentConfigSpec(spec deployapi.DeploymentConfigSpec, w io.Writer) error {
 	fmt.Fprint(w, "Template:\n")
 
 	fmt.Fprintf(w, "  Selector:\t%s\n  Replicas:\t%d\n",
@@ -322,7 +324,7 @@ func NewLatestDeploymentsDescriber(client client.Interface, kclient kclient.Inte
 				return kclient.ReplicationControllers(namespace).Get(name)
 			},
 			listDeploymentsFunc: func(namespace string, selector labels.Selector) (*kapi.ReplicationControllerList, error) {
-				return kclient.ReplicationControllers(namespace).List(selector)
+				return kclient.ReplicationControllers(namespace).List(selector, fields.Everything())
 			},
 			listPodsFunc: func(namespace string, selector labels.Selector) (*kapi.PodList, error) {
 				return kclient.Pods(namespace).List(selector, fields.Everything())

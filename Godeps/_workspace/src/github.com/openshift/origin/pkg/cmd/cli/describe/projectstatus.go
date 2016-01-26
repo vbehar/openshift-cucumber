@@ -4,16 +4,18 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
 	kapi "k8s.io/kubernetes/pkg/api"
 	kapierrors "k8s.io/kubernetes/pkg/api/errors"
-	kclient "k8s.io/kubernetes/pkg/client"
+	"k8s.io/kubernetes/pkg/api/unversioned"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/fields"
 	"k8s.io/kubernetes/pkg/labels"
-	"k8s.io/kubernetes/pkg/util"
 	utilerrors "k8s.io/kubernetes/pkg/util/errors"
+	"k8s.io/kubernetes/pkg/util/sets"
 
 	osgraph "github.com/openshift/origin/pkg/api/graph"
 	"github.com/openshift/origin/pkg/api/graph/graphview"
@@ -27,12 +29,18 @@ import (
 	"github.com/openshift/origin/pkg/client"
 	deployapi "github.com/openshift/origin/pkg/deploy/api"
 	deployedges "github.com/openshift/origin/pkg/deploy/graph"
+	deployanalysis "github.com/openshift/origin/pkg/deploy/graph/analysis"
 	deploygraph "github.com/openshift/origin/pkg/deploy/graph/nodes"
 	deployutil "github.com/openshift/origin/pkg/deploy/util"
 	imageapi "github.com/openshift/origin/pkg/image/api"
 	imageedges "github.com/openshift/origin/pkg/image/graph"
 	imagegraph "github.com/openshift/origin/pkg/image/graph/nodes"
 	projectapi "github.com/openshift/origin/pkg/project/api"
+	routeapi "github.com/openshift/origin/pkg/route/api"
+	routeedges "github.com/openshift/origin/pkg/route/graph"
+	routeanalysis "github.com/openshift/origin/pkg/route/graph/analysis"
+	routegraph "github.com/openshift/origin/pkg/route/graph/nodes"
+	"github.com/openshift/origin/pkg/util/errors"
 	"github.com/openshift/origin/pkg/util/parallel"
 )
 
@@ -40,11 +48,13 @@ const ForbiddenListWarning = "Forbidden"
 
 // ProjectStatusDescriber generates extended information about a Project
 type ProjectStatusDescriber struct {
-	K kclient.Interface
-	C client.Interface
+	K       kclient.Interface
+	C       client.Interface
+	Server  string
+	Suggest bool
 }
 
-func (d *ProjectStatusDescriber) MakeGraph(namespace string) (osgraph.Graph, util.StringSet, error) {
+func (d *ProjectStatusDescriber) MakeGraph(namespace string) (osgraph.Graph, sets.String, error) {
 	g := osgraph.New()
 
 	loaders := []GraphLoader{
@@ -54,18 +64,19 @@ func (d *ProjectStatusDescriber) MakeGraph(namespace string) (osgraph.Graph, uti
 		&rcLoader{namespace: namespace, lister: d.K},
 		&podLoader{namespace: namespace, lister: d.K},
 		// TODO check swagger for feature enablement and selectively add bcLoader and buildLoader
-		// then remove tolerateNotFoundErrors method.
+		// then remove errors.TolerateNotFoundError method.
 		&bcLoader{namespace: namespace, lister: d.C},
 		&buildLoader{namespace: namespace, lister: d.C},
 		&isLoader{namespace: namespace, lister: d.C},
 		&dcLoader{namespace: namespace, lister: d.C},
+		&routeLoader{namespace: namespace, lister: d.C},
 	}
 	loadingFuncs := []func() error{}
 	for _, loader := range loaders {
 		loadingFuncs = append(loadingFuncs, loader.Load)
 	}
 
-	forbiddenResources := util.StringSet{}
+	forbiddenResources := sets.String{}
 	if errs := parallel.Run(loadingFuncs...); len(errs) > 0 {
 		actualErrors := []error{}
 		for _, err := range errs {
@@ -99,6 +110,7 @@ func (d *ProjectStatusDescriber) MakeGraph(namespace string) (osgraph.Graph, uti
 	deployedges.AddAllTriggerEdges(g)
 	deployedges.AddAllDeploymentEdges(g)
 	imageedges.AddAllImageStreamRefEdges(g)
+	routeedges.AddAllRouteEdges(g)
 
 	return g, forbiddenResources, nil
 }
@@ -131,9 +143,13 @@ func (d *ProjectStatusDescriber) Describe(namespace, name string) (string, error
 
 	return tabbedString(func(out *tabwriter.Writer) error {
 		indent := "  "
-		fmt.Fprintf(out, "In project %s\n", projectapi.DisplayNameAndNameForProject(project))
+		fmt.Fprintf(out, describeProjectAndServer(project, d.Server))
 
 		for _, service := range services {
+			if !service.Service.Found() {
+				continue
+			}
+
 			fmt.Fprintln(out)
 			printLines(out, indent, 0, describeServiceInServiceGroup(service)...)
 
@@ -161,6 +177,10 @@ func (d *ProjectStatusDescriber) Describe(namespace, name string) (string, error
 				}
 				printLines(out, indent, 1, describePodInServiceGroup(podNode)...)
 			}
+
+			for _, routeNode := range service.ExposingRoutes {
+				printLines(out, indent, 1, describeRouteInServiceGroup(routeNode)...)
+			}
 		}
 
 		for _, standaloneDC := range standaloneDCs {
@@ -170,8 +190,9 @@ func (d *ProjectStatusDescriber) Describe(namespace, name string) (string, error
 
 		for _, standaloneImage := range standaloneImages {
 			fmt.Fprintln(out)
-			printLines(out, indent, 0, describeStandaloneBuildGroup(standaloneImage, namespace)...)
-			printLines(out, indent, 1, describeAdditionalBuildDetail(standaloneImage.Build, standaloneImage.LastSuccessfulBuild, standaloneImage.LastUnsuccessfulBuild, standaloneImage.ActiveBuilds, standaloneImage.DestinationResolved, true)...)
+			lines := describeStandaloneBuildGroup(standaloneImage, namespace)
+			lines = append(lines, describeAdditionalBuildDetail(standaloneImage.Build, standaloneImage.LastSuccessfulBuild, standaloneImage.LastUnsuccessfulBuild, standaloneImage.ActiveBuilds, standaloneImage.DestinationResolved, true)...)
+			printLines(out, indent, 0, lines...)
 		}
 
 		for _, standaloneRC := range standaloneRCs {
@@ -185,41 +206,82 @@ func (d *ProjectStatusDescriber) Describe(namespace, name string) (string, error
 			allMarkers = append(allMarkers, scanner(g)...)
 		}
 
-		if len(allMarkers) > 0 {
-			fmt.Fprintln(out)
-		}
+		fmt.Fprintln(out)
 
 		sort.Stable(osgraph.ByKey(allMarkers))
 		sort.Stable(osgraph.ByNodeID(allMarkers))
-		if errorMarkers := allMarkers.BySeverity(osgraph.ErrorSeverity); len(errorMarkers) > 0 {
+
+		errorMarkers := allMarkers.BySeverity(osgraph.ErrorSeverity)
+		errorSuggestions := 0
+		if len(errorMarkers) > 0 {
 			fmt.Fprintln(out, "Errors:")
 			for _, marker := range errorMarkers {
-				fmt.Fprintln(out, indent+marker.Message)
+				fmt.Fprintln(out, indent+"* "+marker.Message)
+				if len(marker.Suggestion) > 0 {
+					errorSuggestions++
+					if d.Suggest {
+						fmt.Fprintln(out, indent+"  "+marker.Suggestion.String())
+					}
+				}
 			}
 		}
-		if warningMarkers := allMarkers.BySeverity(osgraph.WarningSeverity); len(warningMarkers) > 0 {
-			fmt.Fprintln(out, "Warnings:")
+
+		warningMarkers := allMarkers.BySeverity(osgraph.WarningSeverity)
+		if len(warningMarkers) > 0 {
+			if d.Suggest {
+				fmt.Fprintln(out, "Warnings:")
+			}
 			for _, marker := range warningMarkers {
-				fmt.Fprintln(out, indent+marker.Message)
+				if d.Suggest {
+					fmt.Fprintln(out, indent+"* "+marker.Message)
+					if len(marker.Suggestion) > 0 {
+						fmt.Fprintln(out, indent+"  "+marker.Suggestion.String())
+					}
+				}
 			}
 		}
 
-		fmt.Fprintln(out)
+		// We print errors by default and warnings if -v is used. If we get none,
+		// this would be an extra new line.
+		if len(errorMarkers) != 0 || (d.Suggest && len(warningMarkers) != 0) {
+			fmt.Fprintln(out)
+		}
 
-		if (len(services) == 0) && (len(standaloneDCs) == 0) && (len(standaloneImages) == 0) {
+		errors, warnings := "", ""
+		if len(errorMarkers) == 1 {
+			errors = "1 error"
+		} else if len(errorMarkers) > 1 {
+			errors = fmt.Sprintf("%d errors", len(errorMarkers))
+		}
+		if len(warningMarkers) == 1 {
+			warnings = "1 warning"
+		} else if len(warningMarkers) > 1 {
+			warnings = fmt.Sprintf("%d warnings", len(warningMarkers))
+		}
+
+		switch {
+		case !d.Suggest && len(errorMarkers) > 0 && len(warningMarkers) > 0:
+			fmt.Fprintf(out, "%s and %s identified, use 'oc status -v' to see details.\n", errors, warnings)
+
+		case !d.Suggest && len(errorMarkers) > 0 && errorSuggestions > 0:
+			fmt.Fprintf(out, "%s identified, use 'oc status -v' to see details.\n", errors)
+
+		case !d.Suggest && len(warningMarkers) > 0:
+			fmt.Fprintf(out, "%s identified, use 'oc status -v' to see details.\n", warnings)
+
+		case (len(services) == 0) && (len(standaloneDCs) == 0) && (len(standaloneImages) == 0):
 			fmt.Fprintln(out, "You have no services, deployment configs, or build configs.")
 			fmt.Fprintln(out, "Run 'oc new-app' to create an application.")
 
-		} else {
-			fmt.Fprintln(out, "To see more, use 'oc describe <resource>/<name>'.")
-			fmt.Fprintln(out, "You can use 'oc get all' to see a list of other objects.")
+		default:
+			fmt.Fprintln(out, "View details with 'oc describe <resource>/<name>' or list everything with 'oc get all'.")
 		}
 
 		return nil
 	})
 }
 
-func createForbiddenMarkers(forbiddenResources util.StringSet) []osgraph.Marker {
+func createForbiddenMarkers(forbiddenResources sets.String) []osgraph.Marker {
 	markers := []osgraph.Marker{}
 	for forbiddenResource := range forbiddenResources {
 		markers = append(markers, osgraph.Marker{
@@ -233,11 +295,16 @@ func createForbiddenMarkers(forbiddenResources util.StringSet) []osgraph.Marker 
 
 func getMarkerScanners() []osgraph.MarkerScanner {
 	return []osgraph.MarkerScanner{
+		kubeanalysis.FindRestartingPods,
 		kubeanalysis.FindDuelingReplicationControllers,
 		kubeanalysis.FindUnmountableSecrets,
 		kubeanalysis.FindMissingSecrets,
 		buildanalysis.FindUnpushableBuildConfigs,
 		buildanalysis.FindCircularBuilds,
+		buildanalysis.FindPendingTags,
+		deployanalysis.FindDeploymentConfigTriggerErrors,
+		routeanalysis.FindMissingPortMapping,
+		routeanalysis.FindMissingTLSTerminationType,
 	}
 }
 
@@ -260,10 +327,18 @@ func indentLines(indent string, lines ...string) []string {
 	return ret
 }
 
+func describeProjectAndServer(project *projectapi.Project, server string) string {
+	if server != "" {
+		return fmt.Sprintf("In project %s on server %s\n", projectapi.DisplayNameAndNameForProject(project), server)
+	} else {
+		return fmt.Sprintf("In project %s\n", projectapi.DisplayNameAndNameForProject(project))
+	}
+}
+
 func describeDeploymentInServiceGroup(deploy graphview.DeploymentConfigPipeline) []string {
 	includeLastPass := deploy.ActiveDeployment == nil
 	if len(deploy.Images) == 1 {
-		lines := []string{fmt.Sprintf("dc/%s deploys %s %s", deploy.Deployment.Name, describeImageInPipeline(deploy.Images[0], deploy.Deployment.Namespace), describeDeploymentConfigTrigger(deploy.Deployment.DeploymentConfig))}
+		lines := []string{fmt.Sprintf("%s deploys %s %s", deploy.Deployment.ResourceString(), describeImageInPipeline(deploy.Images[0], deploy.Deployment.Namespace), describeDeploymentConfigTrigger(deploy.Deployment.DeploymentConfig))}
 		if len(lines[0]) > 120 && strings.Contains(lines[0], " <- ") {
 			segments := strings.SplitN(lines[0], " <- ", 2)
 			lines[0] = segments[0] + " <-"
@@ -274,7 +349,7 @@ func describeDeploymentInServiceGroup(deploy graphview.DeploymentConfigPipeline)
 		return lines
 	}
 
-	lines := []string{fmt.Sprintf("dc/%s deploys: %s", deploy.Deployment.Name, describeDeploymentConfigTrigger(deploy.Deployment.DeploymentConfig))}
+	lines := []string{fmt.Sprintf("%s deploys: %s", deploy.Deployment.ResourceString(), describeDeploymentConfigTrigger(deploy.Deployment.DeploymentConfig))}
 	for _, image := range deploy.Images {
 		lines = append(lines, describeImageInPipeline(image, deploy.Deployment.Namespace))
 		lines = append(lines, indentLines("  ", describeAdditionalBuildDetail(image.Build, image.LastSuccessfulBuild, image.LastUnsuccessfulBuild, image.ActiveBuilds, image.DestinationResolved, includeLastPass)...)...)
@@ -293,7 +368,7 @@ func describeRCInServiceGroup(rcNode *kubegraph.ReplicationControllerNode) []str
 		images = append(images, container.Image)
 	}
 
-	lines := []string{fmt.Sprintf("rc/%s runs %s", rcNode.ReplicationController.Name, strings.Join(images, ", "))}
+	lines := []string{fmt.Sprintf("%s runs %s", rcNode.ResourceString(), strings.Join(images, ", "))}
 	lines = append(lines, describeRCStatus(rcNode.ReplicationController))
 
 	return lines
@@ -305,12 +380,19 @@ func describePodInServiceGroup(podNode *kubegraph.PodNode) []string {
 		images = append(images, container.Image)
 	}
 
-	lines := []string{fmt.Sprintf("pod/%s runs %s", podNode.Pod.Name, strings.Join(images, ", "))}
+	lines := []string{fmt.Sprintf("%s runs %s", podNode.ResourceString(), strings.Join(images, ", "))}
 	return lines
 }
 
+func describeRouteInServiceGroup(routeNode *routegraph.RouteNode) []string {
+	if routeNode.Spec.Port != nil && len(routeNode.Spec.Port.TargetPort.String()) > 0 {
+		return []string{fmt.Sprintf("exposed by %s on pod port %s", routeNode.ResourceString(), routeNode.Spec.Port.TargetPort.String())}
+	}
+	return []string{fmt.Sprintf("exposed by %s", routeNode.ResourceString())}
+}
+
 func describeDeploymentConfigTrigger(dc *deployapi.DeploymentConfig) string {
-	if len(dc.Triggers) == 0 {
+	if len(dc.Spec.Triggers) == 0 {
 		return "(manual)"
 	}
 
@@ -320,7 +402,7 @@ func describeDeploymentConfigTrigger(dc *deployapi.DeploymentConfig) string {
 func describeStandaloneBuildGroup(pipeline graphview.ImagePipeline, namespace string) []string {
 	switch {
 	case pipeline.Build != nil:
-		lines := []string{fmt.Sprintf("bc/%s %s", pipeline.Build.BuildConfig.Name, describeBuildInPipeline(pipeline.Build.BuildConfig, pipeline.BaseImage))}
+		lines := []string{describeBuildInPipeline(pipeline.Build.BuildConfig, pipeline.BaseImage)}
 		if pipeline.Image != nil {
 			lines = append(lines, fmt.Sprintf("pushes to %s", describeImageTagInPipeline(pipeline.Image, namespace)))
 		}
@@ -351,38 +433,38 @@ func describeImageTagInPipeline(image graphview.ImageTagLocation, namespace stri
 		if t.ImageStreamTag.Namespace != namespace {
 			return image.ImageSpec()
 		}
-		return "istag/" + t.ImageStreamTag.Name
+		return t.ResourceString()
 	default:
 		return image.ImageSpec()
 	}
 }
 
 func describeBuildInPipeline(build *buildapi.BuildConfig, baseImage graphview.ImageTagLocation) string {
-	switch build.Spec.Strategy.Type {
-	case buildapi.DockerBuildStrategyType:
+	switch {
+	case build.Spec.Strategy.DockerStrategy != nil:
 		// TODO: handle case where no source repo
 		source, ok := describeSourceInPipeline(&build.Spec.Source)
 		if !ok {
-			return fmt.Sprintf("unconfigured docker build bc/%s - no source set", build.Name)
+			return fmt.Sprintf("bc/%s unconfigured docker build - no source set", build.Name)
 		}
-		return fmt.Sprintf("docker build of %s through bc/%s", source, build.Name)
-	case buildapi.SourceBuildStrategyType:
+		return fmt.Sprintf("bc/%s docker build of %s", build.Name, source)
+	case build.Spec.Strategy.SourceStrategy != nil:
 		source, ok := describeSourceInPipeline(&build.Spec.Source)
 		if !ok {
-			return fmt.Sprintf("unconfigured source build bc/%s", build.Name)
+			return fmt.Sprintf("bc/%s unconfigured source build", build.Name)
 		}
 		if baseImage == nil {
-			return fmt.Sprintf("%s through bc/%s; no image set", source, build.Name)
+			return fmt.Sprintf("bc/%s %s; no image set", build.Name, source)
 		}
-		return fmt.Sprintf("builds %s with %s through bc/%s", source, baseImage.ImageSpec(), build.Name)
-	case buildapi.CustomBuildStrategyType:
+		return fmt.Sprintf("bc/%s builds %s with %s", build.Name, source, baseImage.ImageSpec())
+	case build.Spec.Strategy.CustomStrategy != nil:
 		source, ok := describeSourceInPipeline(&build.Spec.Source)
 		if !ok {
-			return fmt.Sprintf("custom build bc/%s ", build.Name)
+			return fmt.Sprintf("bc/%s custom build ", build.Name)
 		}
-		return fmt.Sprintf("custom build of %s through bc/%s", source, build.Name)
+		return fmt.Sprintf("bc/%s custom build of %s", build.Name, source)
 	default:
-		return fmt.Sprintf("unrecognized build bc/%s", build.Name)
+		return fmt.Sprintf("bc/%s unrecognized build", build.Name)
 	}
 }
 
@@ -392,11 +474,11 @@ func describeAdditionalBuildDetail(build *buildgraph.BuildConfigNode, lastSucces
 	}
 	out := []string{}
 
-	passTime := util.Time{}
+	passTime := unversioned.Time{}
 	if lastSuccessfulBuild != nil {
 		passTime = buildTimestamp(lastSuccessfulBuild.Build)
 	}
-	failTime := util.Time{}
+	failTime := unversioned.Time{}
 	if lastUnsuccessfulBuild != nil {
 		failTime = buildTimestamp(lastUnsuccessfulBuild.Build)
 	}
@@ -406,7 +488,8 @@ func describeAdditionalBuildDetail(build *buildgraph.BuildConfigNode, lastSucces
 		lastTime = passTime
 	}
 
-	if lastSuccessfulBuild != nil && includeSuccess {
+	// display the last successful build if specifically requested or we're going to display an active build for context
+	if lastSuccessfulBuild != nil && (includeSuccess || len(activeBuilds) > 0) {
 		out = append(out, describeBuildPhase(lastSuccessfulBuild.Build, &passTime, build.BuildConfig.Name, pushTargetResolved))
 	}
 	if passTime.Before(failTime) {
@@ -431,7 +514,7 @@ func describeAdditionalBuildDetail(build *buildgraph.BuildConfigNode, lastSucces
 	return out
 }
 
-func describeBuildPhase(build *buildapi.Build, t *util.Time, parentName string, pushTargetResolved bool) string {
+func describeBuildPhase(build *buildapi.Build, t *unversioned.Time, parentName string, pushTargetResolved bool) string {
 	imageStreamFailure := ""
 	// if we're using an image stream and that image stream is the internal registry and that registry doesn't exist
 	if (build.Spec.Output.To != nil) && !pushTargetResolved {
@@ -448,25 +531,30 @@ func describeBuildPhase(build *buildapi.Build, t *util.Time, parentName string, 
 	} else {
 		time = strings.ToLower(formatRelativeTime(t.Time))
 	}
-	name := build.Name
+	buildIdentification := fmt.Sprintf("build/%s", build.Name)
 	prefix := parentName + "-"
-	if strings.HasPrefix(name, prefix) {
-		name = name[len(prefix):]
+	if strings.HasPrefix(build.Name, prefix) {
+		suffix := build.Name[len(prefix):]
+
+		if buildNumber, err := strconv.Atoi(suffix); err == nil {
+			buildIdentification = fmt.Sprintf("#%d build", buildNumber)
+		}
 	}
+
 	revision := describeSourceRevision(build.Spec.Revision)
 	if len(revision) != 0 {
 		revision = fmt.Sprintf(" - %s", revision)
 	}
 	switch build.Status.Phase {
 	case buildapi.BuildPhaseComplete:
-		return fmt.Sprintf("build %s succeeded %s ago%s%s", name, time, revision, imageStreamFailure)
+		return fmt.Sprintf("%s succeeded %s ago%s%s", buildIdentification, time, revision, imageStreamFailure)
 	case buildapi.BuildPhaseError:
-		return fmt.Sprintf("build %s stopped with an error %s ago%s%s", name, time, revision, imageStreamFailure)
+		return fmt.Sprintf("%s stopped with an error %s ago%s%s", buildIdentification, time, revision, imageStreamFailure)
 	case buildapi.BuildPhaseFailed:
-		return fmt.Sprintf("build %s failed %s ago%s%s", name, time, revision, imageStreamFailure)
+		return fmt.Sprintf("%s failed %s ago%s%s", buildIdentification, time, revision, imageStreamFailure)
 	default:
 		status := strings.ToLower(string(build.Status.Phase))
-		return fmt.Sprintf("build %s %s for %s%s%s", name, status, time, revision, imageStreamFailure)
+		return fmt.Sprintf("%s %s for %s%s%s", buildIdentification, status, time, revision, imageStreamFailure)
 	}
 }
 
@@ -503,9 +591,9 @@ func describeSourceControlUser(user buildapi.SourceControlUser) string {
 	return fmt.Sprintf("%s <%s>", user.Name, user.Email)
 }
 
-func buildTimestamp(build *buildapi.Build) util.Time {
+func buildTimestamp(build *buildapi.Build) unversioned.Time {
 	if build == nil {
-		return util.Time{}
+		return unversioned.Time{}
 	}
 	if !build.Status.CompletionTimestamp.IsZero() {
 		return *build.Status.CompletionTimestamp
@@ -517,12 +605,14 @@ func buildTimestamp(build *buildapi.Build) util.Time {
 }
 
 func describeSourceInPipeline(source *buildapi.BuildSource) (string, bool) {
-	switch source.Type {
-	case buildapi.BuildSourceGit:
+	switch {
+	case source.Git != nil:
 		if len(source.Git.Ref) == 0 {
 			return source.Git.URI, true
 		}
 		return fmt.Sprintf("%s#%s", source.Git.URI, source.Git.Ref), true
+	case source.Dockerfile != nil:
+		return "Dockerfile", true
 	}
 	return "", false
 }
@@ -536,10 +626,10 @@ func describeDeployments(dcNode *deploygraph.DeploymentConfigNode, activeDeploym
 
 	if activeDeployment == nil {
 		on, auto := describeDeploymentConfigTriggers(dcNode.DeploymentConfig)
-		if dcNode.DeploymentConfig.LatestVersion == 0 {
+		if dcNode.DeploymentConfig.Status.LatestVersion == 0 {
 			out = append(out, fmt.Sprintf("#1 deployment waiting %s", on))
 		} else if auto {
-			out = append(out, fmt.Sprintf("#%d deployment pending %s", dcNode.DeploymentConfig.LatestVersion, on))
+			out = append(out, fmt.Sprintf("#%d deployment pending %s", dcNode.DeploymentConfig.Status.LatestVersion, on))
 		}
 		// TODO: detect new image available?
 	} else {
@@ -626,7 +716,7 @@ func describePodSummary(rc *kapi.ReplicationController, includeEmpty bool) strin
 
 func describeDeploymentConfigTriggers(config *deployapi.DeploymentConfig) (string, bool) {
 	hasConfig, hasImage := false, false
-	for _, t := range config.Triggers {
+	for _, t := range config.Spec.Triggers {
 		switch t.Type {
 		case deployapi.DeploymentTriggerOnConfigChange:
 			hasConfig = true
@@ -652,11 +742,11 @@ func describeServiceInServiceGroup(svc graphview.ServiceGroup) []string {
 	port := describeServicePorts(spec)
 	switch {
 	case ip == "None":
-		return []string{fmt.Sprintf("service/%s (headless)%s", svc.Service.Name, port)}
+		return []string{fmt.Sprintf("%s (headless)%s", svc.Service.ResourceString(), port)}
 	case len(ip) == 0:
-		return []string{fmt.Sprintf("service/%s <initializing>%s", svc.Service.Name, port)}
+		return []string{fmt.Sprintf("%s <initializing>%s", svc.Service.ResourceString(), port)}
 	default:
-		return []string{fmt.Sprintf("service/%s - %s%s", svc.Service.Name, ip, port)}
+		return []string{fmt.Sprintf("%s - %s%s", svc.Service.ResourceString(), ip, port)}
 	}
 }
 
@@ -703,7 +793,7 @@ type rcLoader struct {
 }
 
 func (l *rcLoader) Load() error {
-	list, err := l.lister.ReplicationControllers(l.namespace).List(labels.Everything())
+	list, err := l.lister.ReplicationControllers(l.namespace).List(labels.Everything(), fields.Everything())
 	if err != nil {
 		return err
 	}
@@ -727,7 +817,7 @@ type serviceLoader struct {
 }
 
 func (l *serviceLoader) Load() error {
-	list, err := l.lister.Services(l.namespace).List(labels.Everything())
+	list, err := l.lister.Services(l.namespace).List(labels.Everything(), fields.Everything())
 	if err != nil {
 		return err
 	}
@@ -874,7 +964,7 @@ type bcLoader struct {
 func (l *bcLoader) Load() error {
 	list, err := l.lister.BuildConfigs(l.namespace).List(labels.Everything(), fields.Everything())
 	if err != nil {
-		return tolerateNotFoundErrors(err)
+		return errors.TolerateNotFoundError(err)
 	}
 
 	l.items = list.Items
@@ -898,7 +988,7 @@ type buildLoader struct {
 func (l *buildLoader) Load() error {
 	list, err := l.lister.Builds(l.namespace).List(labels.Everything(), fields.Everything())
 	if err != nil {
-		return tolerateNotFoundErrors(err)
+		return errors.TolerateNotFoundError(err)
 	}
 
 	l.items = list.Items
@@ -913,11 +1003,26 @@ func (l *buildLoader) AddToGraph(g osgraph.Graph) error {
 	return nil
 }
 
-// tolerateNotFoundErrors is tolerant of not found errors in case builds are disabled server
-// side (Atomic).
-func tolerateNotFoundErrors(err error) error {
-	if kapierrors.IsNotFound(err) {
-		return nil
+type routeLoader struct {
+	namespace string
+	lister    client.RoutesNamespacer
+	items     []routeapi.Route
+}
+
+func (l *routeLoader) Load() error {
+	list, err := l.lister.Routes(l.namespace).List(labels.Everything(), fields.Everything())
+	if err != nil {
+		return err
 	}
-	return err
+
+	l.items = list.Items
+	return nil
+}
+
+func (l *routeLoader) AddToGraph(g osgraph.Graph) error {
+	for i := range l.items {
+		routegraph.EnsureRouteNode(g, &l.items[i])
+	}
+
+	return nil
 }

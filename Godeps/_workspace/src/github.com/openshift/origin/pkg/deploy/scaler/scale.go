@@ -4,30 +4,35 @@ import (
 	"time"
 
 	kapi "k8s.io/kubernetes/pkg/api"
-	kclient "k8s.io/kubernetes/pkg/client"
+	kclient "k8s.io/kubernetes/pkg/client/unversioned"
 	"k8s.io/kubernetes/pkg/kubectl"
 	"k8s.io/kubernetes/pkg/util/wait"
 
 	"github.com/openshift/origin/pkg/client"
+	deployapi "github.com/openshift/origin/pkg/deploy/api"
 	"github.com/openshift/origin/pkg/deploy/util"
 )
 
 // NewDeploymentConfigScaler returns a new scaler for deploymentConfigs
-func NewDeploymentConfigScaler(oc *client.Client, kc *kclient.Client) kubectl.Scaler {
-	return &DeploymentConfigScaler{c: NewScalerClient(oc, kc)}
+func NewDeploymentConfigScaler(oc client.Interface, kc kclient.Interface) kubectl.Scaler {
+	return &DeploymentConfigScaler{rcClient: kc, dcClient: oc, clientInterface: kc}
 }
 
 // DeploymentConfigScaler is a wrapper for the kubectl Scaler client
 type DeploymentConfigScaler struct {
-	c kubectl.ScalerClient
+	rcClient kclient.ReplicationControllersNamespacer
+	dcClient client.DeploymentConfigsNamespacer
+
+	clientInterface kclient.Interface
 }
 
-// Scale updates a replication controller created by the DeploymentConfig with the provided namespace/name,
-// to a new size, with optional precondition check (if preconditions is not nil),optional retries (if retry
-//  is not nil), and then optionally waits for it's replica count to reach the new value (if wait is not nil).
+// Scale updates the DeploymentConfig with the provided namespace/name, to a
+// new size, with optional precondition check (if preconditions is not nil),
+// optional retries (if retry is not nil), and then optionally waits for its
+// deployment replica count to reach the new value (if wait is not nil).
 func (scaler *DeploymentConfigScaler) Scale(namespace, name string, newSize uint, preconditions *kubectl.ScalePrecondition, retry, waitForReplicas *kubectl.RetryParams) error {
 	if preconditions == nil {
-		preconditions = &kubectl.ScalePrecondition{-1, ""}
+		preconditions = &kubectl.ScalePrecondition{Size: -1, ResourceVersion: ""}
 	}
 	if retry == nil {
 		// Make it try only once, immediately
@@ -38,67 +43,56 @@ func (scaler *DeploymentConfigScaler) Scale(namespace, name string, newSize uint
 		return err
 	}
 	if waitForReplicas != nil {
-		rc, err := scaler.c.GetReplicationController(namespace, name)
+		dc, err := scaler.dcClient.DeploymentConfigs(namespace).Get(name)
 		if err != nil {
 			return err
 		}
-		return wait.Poll(waitForReplicas.Interval, waitForReplicas.Timeout,
-			scaler.c.ControllerHasDesiredReplicas(rc))
+		rc, err := scaler.rcClient.ReplicationControllers(namespace).Get(util.LatestDeploymentNameForConfig(dc))
+		if err != nil {
+			return err
+		}
+		return wait.Poll(waitForReplicas.Interval, waitForReplicas.Timeout, controllerHasSpecifiedReplicas(scaler.clientInterface, rc, dc.Spec.Replicas))
 	}
 	return nil
 }
 
-// ScaleSimple does a simple one-shot attempt at scaling - not useful on it's own, but
-// a necessary building block for Scale
-func (scaler *DeploymentConfigScaler) ScaleSimple(namespace, name string, preconditions *kubectl.ScalePrecondition, newSize uint) (string, error) {
-	const scaled = "scaled"
-	controller, err := scaler.c.GetReplicationController(namespace, name)
+// ScaleSimple does a simple one-shot attempt at scaling - not useful on it's
+// own, but a necessary building block for Scale
+func (scaler *DeploymentConfigScaler) ScaleSimple(namespace, name string, preconditions *kubectl.ScalePrecondition, newSize uint) error {
+	dc, err := scaler.dcClient.DeploymentConfigs(namespace).Get(name)
 	if err != nil {
-		return "", kubectl.ControllerScaleError{kubectl.ControllerScaleGetFailure, "Unknown", err}
+		return err
 	}
-	if preconditions != nil {
-		if err := preconditions.Validate(controller); err != nil {
-			return "", err
+	scale := deployapi.ScaleFromConfig(dc)
+	scale.Spec.Replicas = int(newSize)
+	if _, err := scaler.dcClient.DeploymentConfigs(namespace).UpdateScale(scale); err != nil {
+		return kubectl.ControllerScaleError{FailureType: kubectl.ControllerScaleUpdateFailure, ResourceVersion: dc.ResourceVersion, ActualError: err}
+	}
+	return nil
+}
+
+// controllerHasSpecifiedReplicas returns a condition that will be true if and
+// only if the specified replica count for a controller's ReplicaSelector
+// equals the Replicas count.
+//
+// This is a slightly modified version of
+// unversioned.ControllerHasDesiredReplicas. This  is necessary because when
+// scaling an RC via a DC, the RC spec replica count is not immediately
+// updated to match the owning DC.
+func controllerHasSpecifiedReplicas(c kclient.Interface, controller *kapi.ReplicationController, specifiedReplicas int) wait.ConditionFunc {
+	// If we're given a controller where the status lags the spec, it either means that the controller is stale,
+	// or that the rc manager hasn't noticed the update yet. Polling status.Replicas is not safe in the latter case.
+	desiredGeneration := controller.Generation
+
+	return func() (bool, error) {
+		ctrl, err := c.ReplicationControllers(controller.Namespace).Get(controller.Name)
+		if err != nil {
+			return false, err
 		}
+		// There's a chance a concurrent update modifies the Spec.Replicas causing this check to pass,
+		// or, after this check has passed, a modification causes the rc manager to create more pods.
+		// This will not be an issue once we've implemented graceful delete for rcs, but till then
+		// concurrent stop operations on the same rc might have unintended side effects.
+		return ctrl.Status.ObservedGeneration >= desiredGeneration && ctrl.Status.Replicas == specifiedReplicas, nil
 	}
-	controller.Spec.Replicas = int(newSize)
-	// TODO: do retry on 409 errors here?
-	if _, err := scaler.c.UpdateReplicationController(namespace, controller); err != nil {
-		return "", kubectl.ControllerScaleError{kubectl.ControllerScaleUpdateFailure, controller.ResourceVersion, err}
-	}
-	// TODO: do a better job of printing objects here.
-	return scaled, nil
-}
-
-// NewScalerClient returns a new Scaler client bundling both the OpenShift and
-// Kubernetes clients
-func NewScalerClient(oc client.Interface, kc kclient.Interface) kubectl.ScalerClient {
-	return &realScalerClient{oc: oc, kc: kc}
-}
-
-// realScalerClient is a ScalerClient which uses an OpenShift and a Kube client.
-type realScalerClient struct {
-	oc client.Interface
-	kc kclient.Interface
-}
-
-// GetReplicationController returns the most recent replication controller associated with the deploymentConfig
-// with the provided namespace/name combination
-func (c *realScalerClient) GetReplicationController(namespace, name string) (*kapi.ReplicationController, error) {
-	dc, err := c.oc.DeploymentConfigs(namespace).Get(name)
-	if err != nil {
-		return nil, err
-	}
-	return c.kc.ReplicationControllers(namespace).Get(util.LatestDeploymentNameForConfig(dc))
-}
-
-// UpdateReplicationController updates the provided replication controller
-func (c *realScalerClient) UpdateReplicationController(namespace string, rc *kapi.ReplicationController) (*kapi.ReplicationController, error) {
-	return c.kc.ReplicationControllers(namespace).Update(rc)
-}
-
-// ControllerHasDesiredReplicas checks whether the provided replication controller has the desired replicas
-// number set
-func (c *realScalerClient) ControllerHasDesiredReplicas(rc *kapi.ReplicationController) wait.ConditionFunc {
-	return kclient.ControllerHasDesiredReplicas(c.kc, rc)
 }
