@@ -141,8 +141,18 @@ func (c *Context) DeleteProject(projectName string) error {
 		return err
 	}
 
-	// FIXME wait a little to make sure the project has been deleted
-	time.Sleep(1 * time.Second)
+	// make sure the project has been deleted
+	for {
+		exists, err := c.ProjectExists(projectName)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
 	return nil
 }
 
@@ -159,7 +169,17 @@ func (c *Context) CreateNewProject(projectName string) error {
 		return err
 	}
 
-	// FIXME wait a little to make sure the project has been created
-	time.Sleep(1 * time.Second)
+	// make sure the project has been created
+	for {
+		exists, err := c.ProjectExists(projectName)
+		if err != nil {
+			return err
+		}
+		if exists {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
 	return nil
 }
