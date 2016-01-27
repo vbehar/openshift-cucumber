@@ -1,6 +1,8 @@
 package steps
 
 import (
+	"fmt"
+
 	authapi "github.com/openshift/origin/pkg/authorization/api"
 
 	"k8s.io/kubernetes/pkg/fields"
@@ -12,72 +14,86 @@ func init() {
 	RegisterSteps(func(c *Context) {
 
 		c.Then(`The group "(.+?)" should have the "(.+?)" role$`, func(groupName string, roleName string) {
-			c.checkGroupHasRole(groupName, roleName)
+			groupHasRole, err := c.GroupHasRole(groupName, roleName)
+			if err != nil {
+				c.Fail("Failed to check the roles for group %s: %v", groupName, err)
+				return
+			}
+			if !groupHasRole {
+				c.Fail("The group '%s' does not have the '%s' role !", groupName, roleName)
+			}
 		})
 
 		c.Then(`The user "(.+?)" should have the "(.+?)" role$`, func(userName string, roleName string) {
-			c.checkUserHasRole(userName, roleName)
+			userHasRole, err := c.UserHasRole(userName, roleName)
+			if err != nil {
+				c.Fail("Failed to check the roles for user %s: %v", userName, err)
+				return
+			}
+			if !userHasRole {
+				c.Fail("The user '%s' does not have the '%s' role !", userName, roleName)
+			}
 		})
 
 		c.Then(`I should have the "(.+?)" role$`, func(roleName string) {
-			c.checkUserHasRole("", roleName)
+			userHasRole, err := c.UserHasRole("", roleName)
+			if err != nil {
+				c.Fail("Failed to check the roles for the current user: %v", err)
+				return
+			}
+			if !userHasRole {
+				c.Fail("The current user does not have the '%s' role !", roleName)
+			}
 		})
 
 	})
 }
 
-// checkUserHasRole checks that the given user has the given role
-func (c *Context) checkUserHasRole(userName string, roleName string) {
+// UserHasRole checks if the given user has the given role
+// if the userName is empty, the current user will be used
+func (c *Context) UserHasRole(userName string, roleName string) (bool, error) {
 	rb, err := c.GetRoleBindingForRole(roleName)
 	if err != nil {
-		c.Fail("Failed to get Role Binding for role '%s': %v", roleName, err)
-		return
+		return false, err
 	}
 	if rb == nil {
-		c.Fail("Could not find a Role Binding for role '%s'", roleName)
-		return
+		return false, fmt.Errorf("Could not find a Role Binding for role '%s'", roleName)
 	}
 
 	if len(userName) == 0 {
 		user, err := c.GetCurrentUser()
 		if err != nil {
-			c.Fail("Failed to get the current User: %v", err)
-			return
+			return false, err
 		}
 		userName = user.Name
 	}
 
 	namespace, err := c.Namespace()
 	if err != nil {
-		c.Fail("Could not find Namespace")
-		return
+		return false, err
 	}
+
 	users, _, _, _ := authapi.SubjectsStrings(namespace, rb.Subjects)
-	if !contains(userName, users) {
-		c.Fail("The user '%s' does not have the '%s' role !", userName, roleName)
-	}
+	return contains(userName, users), nil
 }
 
-// checkGroupHasRole checks that the given group has the given role
-func (c *Context) checkGroupHasRole(groupName string, roleName string) {
+// GroupHasRole checks that the given group has the given role
+func (c *Context) GroupHasRole(groupName string, roleName string) (bool, error) {
 	rb, err := c.GetRoleBindingForRole(roleName)
 	if err != nil {
-		c.Fail("Failed to get Role Binding for role '%s': %v", roleName, err)
-		return
+		return false, err
 	}
 	if rb == nil {
-		c.Fail("Could not find a Role Binding for role '%s'", roleName)
-		return
+		return false, fmt.Errorf("Could not find a Role Binding for role '%s'", roleName)
 	}
+
 	namespace, err := c.Namespace()
 	if err != nil {
-		c.Fail("Could not find Namespace")
-		return
+		return false, err
 	}
+
 	_, groups, _, _ := authapi.SubjectsStrings(namespace, rb.Subjects)
-	if !contains(groupName, groups) {
-		c.Fail("The group '%s' does not have the '%s' role !", groupName, roleName)
-	}
+	return contains(groupName, groups), nil
 }
 
 // GetRoleBinding gets the RoleBinding with the given role name, or returns an error
