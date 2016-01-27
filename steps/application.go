@@ -2,6 +2,7 @@ package steps
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"regexp"
 	"strings"
@@ -73,8 +74,8 @@ func (c *Context) NewAppFromTemplate(templateName string, templateParameters []s
 	appConfig.SetTyper(typer)
 	appConfig.SetMapper(mapper)
 	appConfig.SetClientMapper(clientMapper)
-	appConfig.Out = os.Stdout
-	appConfig.ErrOut = os.Stderr
+	appConfig.Out = ioutil.Discard
+	appConfig.ErrOut = ioutil.Discard
 	appConfig.SetOpenShiftClient(client, namespace)
 	appConfig.Components = append(appConfig.Components, templateName)
 	if len(templateParameters) > 0 {
