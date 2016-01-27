@@ -73,7 +73,7 @@ func (c *Context) UserHasRole(userName string, roleName string) (bool, error) {
 		return false, err
 	}
 
-	users, _, _, _ := authapi.SubjectsStrings(namespace, rb.Subjects)
+	users, _ := authapi.StringSubjectsFor(namespace, rb.Subjects)
 	return contains(userName, users), nil
 }
 
@@ -92,7 +92,7 @@ func (c *Context) GroupHasRole(groupName string, roleName string) (bool, error) 
 		return false, err
 	}
 
-	_, groups, _, _ := authapi.SubjectsStrings(namespace, rb.Subjects)
+	_, groups := authapi.StringSubjectsFor(namespace, rb.Subjects)
 	return contains(groupName, groups), nil
 }
 
