@@ -5,6 +5,9 @@ import (
 
 	templateapi "github.com/openshift/origin/pkg/template/api"
 
+	"k8s.io/kubernetes/pkg/fields"
+	"k8s.io/kubernetes/pkg/labels"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -58,6 +61,19 @@ func init() {
 			assert.Equal(c.T, expectedParameters, len(template.Parameters), "Template %s has %d parameters, but expected number is %d !", template.Name, len(template.Parameters), expectedParameters)
 		})
 
+		c.Then(`^I should not have a template "(.+?)"$`, func(templateName string) {
+			found, err := c.TemplateExists(templateName)
+			if err != nil {
+				c.Fail("Failed to check for template '%s' existance: %v", templateName, err)
+				return
+			}
+
+			if found {
+				c.Fail("Template %s should not exists", templateName)
+				return
+			}
+		})
+
 		c.Given(`^I have a template "(.+?)"$`, func(templateName string) {
 			if _, err := c.GetTemplate(templateName); err != nil {
 				c.Fail("Template '%s' does not exists: %v", templateName, err)
@@ -65,6 +81,31 @@ func init() {
 		})
 
 	})
+}
+
+// TemplateExists checks if a template with the given name exists.
+func (c *Context) TemplateExists(tmplName string) (bool, error) {
+	client, _, err := c.Clients()
+	if err != nil {
+		return false, err
+	}
+
+	namespace, err := c.Namespace()
+	if err != nil {
+		return false, err
+	}
+
+	tmplList, err := client.Templates(namespace).List(labels.Everything(), fields.Everything())
+	if err != nil {
+		return false, err
+	}
+
+	for _, t := range tmplList.Items {
+		if t.Name == tmplName {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // GetTemplate gets the Template with the given name, or returns an error
