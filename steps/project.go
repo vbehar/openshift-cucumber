@@ -165,7 +165,12 @@ func (c *Context) CreateNewProject(projectName string) error {
 
 	projectRequest := &projectapi.ProjectRequest{}
 	projectRequest.Name = projectName
-	if _, err = client.ProjectRequests().Create(projectRequest); err != nil {
+
+	err = c.ExecWithExponentialBackoff(func() (err error) {
+		_, err = client.ProjectRequests().Create(projectRequest)
+		return
+	})
+	if err != nil {
 		return err
 	}
 
