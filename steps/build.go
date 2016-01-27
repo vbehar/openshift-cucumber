@@ -140,10 +140,9 @@ func (c *Context) IsBuildComplete(buildName string, timeout time.Duration) (bool
 	for time.Now().Sub(startTime) < timeout {
 		var build *buildapi.Build
 
-		err = c.ExecWithExponentialBackoff(func() error {
-			var err error
+		err = c.ExecWithExponentialBackoff(func() (err error) {
 			build, err = client.Builds(namespace).Get(buildName)
-			return err
+			return
 		})
 		if err != nil {
 			return false, err

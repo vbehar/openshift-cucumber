@@ -230,10 +230,9 @@ func (c *Context) IsDeploymentComplete(deploymentName string, timeout time.Durat
 	for time.Now().Sub(startTime) < timeout {
 		var rc *kapi.ReplicationController
 
-		err = c.ExecWithExponentialBackoff(func() error {
-			var err error
+		err = c.ExecWithExponentialBackoff(func() (err error) {
 			rc, err = kclient.ReplicationControllers(namespace).Get(deploymentName)
-			return err
+			return
 		})
 		if err != nil {
 			return false, err

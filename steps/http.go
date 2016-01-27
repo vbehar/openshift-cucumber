@@ -100,10 +100,9 @@ func (c *Context) execHttpGetRequest(url string, headers http.Header) (*http.Res
 	}
 
 	var resp *http.Response
-	err = c.ExecWithExponentialBackoff(func() error {
-		var err error
+	err = c.ExecWithExponentialBackoff(func() (err error) {
 		resp, err = client.Do(req)
-		return err
+		return
 	})
 
 	if err != nil {
