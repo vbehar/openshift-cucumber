@@ -30,6 +30,7 @@ func init() {
 func main() {
 	flags := pflag.NewFlagSet("openshift-cucumber", pflag.ExitOnError)
 	printVersion := flags.BoolP("version", "v", false, "print version")
+	featuresFilesOrDirs := flags.StringSliceP("features", "f", []string{}, "paths to .feature files or directories")
 	reporterName := flags.StringP("reporter", "r", "", "reporter (junit)")
 	outputFile := flags.StringP("output", "o", "", "output file")
 	//util.AddFlagSetToPFlagSet(flag.CommandLine, flags) // import glog flags
@@ -46,23 +47,29 @@ func main() {
 		os.Exit(0)
 	}
 
-	if len(os.Args) == 1 {
-		usage := `%[1]s will run tests for all the cucumber '*.feature' files found in the provided paths.
-
-Usage:
-%[1]s /path/to/directory-with-cucumber-feature-files
-`
-		fmt.Printf(usage, os.Args[0])
+	if len(*featuresFilesOrDirs) == 0 {
+		flags.PrintDefaults()
 		os.Exit(1)
 	}
 
 	features := []string{}
-	for _, dir := range os.Args[1:] {
-		firstLevelFiles, _ := filepath.Glob(filepath.Join(dir, "*.feature"))
-		subLevelsFiles, _ := filepath.Glob(filepath.Join(dir, "**", "*.feature"))
+	for _, dir := range *featuresFilesOrDirs {
+		info, err := os.Stat(dir)
+		if err != nil {
+			log.Printf("Failed to open path %s: %v", dir, err)
+			continue
+		}
 
-		features = append(features, firstLevelFiles...)
-		features = append(features, subLevelsFiles...)
+		if info.IsDir() {
+			if files, _ := filepath.Glob(filepath.Join(dir, "*.feature")); files != nil {
+				features = append(features, files...)
+			}
+			if files, _ := filepath.Glob(filepath.Join(dir, "**", "*.feature")); files != nil {
+				features = append(features, files...)
+			}
+		} else {
+			features = append(features, dir)
+		}
 	}
 
 	c := steps.NewContext(&gucumber.GlobalContext)
