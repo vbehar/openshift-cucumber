@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	_ "github.com/golang/glog" // init glog flags
 	"github.com/vbehar/openshift-cucumber/reporter"
 	"github.com/vbehar/openshift-cucumber/steps"
 
@@ -33,7 +34,7 @@ func main() {
 	featuresFilesOrDirs := flags.StringSliceP("features", "f", []string{}, "paths to .feature files or directories")
 	reporterName := flags.StringP("reporter", "r", "", "reporter (junit)")
 	outputFile := flags.StringP("output", "o", "", "output file")
-	//util.AddFlagSetToPFlagSet(flag.CommandLine, flags) // import glog flags
+	flags.AddGoFlagSet(flag.CommandLine)
 	flags.Parse(os.Args[1:])
 
 	if *printVersion {
