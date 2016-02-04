@@ -52,11 +52,11 @@ func init() {
 // UserHasRole checks if the given user has the given role
 // if the userName is empty, the current user will be used
 func (c *Context) UserHasRole(userName string, roleName string) (bool, error) {
-	rb, err := c.GetRoleBindingForRole(roleName)
+	roleBindings, err := c.GetRoleBindingsForRole(roleName)
 	if err != nil {
 		return false, err
 	}
-	if rb == nil {
+	if len(roleBindings) == 0 {
 		return false, fmt.Errorf("Could not find a Role Binding for role '%s'", roleName)
 	}
 
@@ -73,17 +73,22 @@ func (c *Context) UserHasRole(userName string, roleName string) (bool, error) {
 		return false, err
 	}
 
-	users, _ := authapi.StringSubjectsFor(namespace, rb.Subjects)
-	return contains(userName, users), nil
+	allUsers := []string{}
+	for _, rb := range roleBindings {
+		users, _ := authapi.StringSubjectsFor(namespace, rb.Subjects)
+		allUsers = append(allUsers, users...)
+	}
+
+	return contains(userName, allUsers), nil
 }
 
 // GroupHasRole checks that the given group has the given role
 func (c *Context) GroupHasRole(groupName string, roleName string) (bool, error) {
-	rb, err := c.GetRoleBindingForRole(roleName)
+	roleBindings, err := c.GetRoleBindingsForRole(roleName)
 	if err != nil {
 		return false, err
 	}
-	if rb == nil {
+	if len(roleBindings) == 0 {
 		return false, fmt.Errorf("Could not find a Role Binding for role '%s'", roleName)
 	}
 
@@ -92,12 +97,17 @@ func (c *Context) GroupHasRole(groupName string, roleName string) (bool, error) 
 		return false, err
 	}
 
-	_, groups := authapi.StringSubjectsFor(namespace, rb.Subjects)
-	return contains(groupName, groups), nil
+	allGroups := []string{}
+	for _, rb := range roleBindings {
+		_, groups := authapi.StringSubjectsFor(namespace, rb.Subjects)
+		allGroups = append(allGroups, groups...)
+	}
+
+	return contains(groupName, allGroups), nil
 }
 
-// GetRoleBinding gets the RoleBinding with the given role name, or returns an error
-func (c *Context) GetRoleBindingForRole(roleName string) (*authapi.RoleBinding, error) {
+// GetRoleBindingsForRole gets the RoleBindings with the given role name, or returns an error
+func (c *Context) GetRoleBindingsForRole(roleName string) ([]authapi.RoleBinding, error) {
 	oclient, _, err := c.Clients()
 	if err != nil {
 		return nil, err
@@ -112,13 +122,14 @@ func (c *Context) GetRoleBindingForRole(roleName string) (*authapi.RoleBinding, 
 	if err != nil {
 		return nil, err
 	}
+
+	roleBindings := []authapi.RoleBinding{}
 	for _, rb := range rbList.Items {
 		if rb.RoleRef.Name == roleName {
-			return &rb, nil
+			roleBindings = append(roleBindings, rb)
 		}
 	}
-
-	return nil, nil
+	return roleBindings, nil
 }
 
 func contains(value string, elts []string) bool {
