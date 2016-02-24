@@ -32,7 +32,7 @@ type Context struct {
 // It will register all known steps on the gucumber context
 func NewContext(gc *gucumber.Context) *Context {
 	b := backoff.NewExponentialBackOff()
-	b.MaxElapsedTime = 10 * time.Second
+	b.MaxElapsedTime = 30 * time.Second
 
 	c := &Context{
 		Context: gc,

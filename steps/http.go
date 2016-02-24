@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -102,6 +103,11 @@ func (c *Context) execHttpGetRequest(url string, headers http.Header) (*http.Res
 	var resp *http.Response
 	err = c.ExecWithExponentialBackoff(func() (err error) {
 		resp, err = client.Do(req)
+		if err == nil {
+			if resp.StatusCode >= 500 {
+				err = fmt.Errorf("Invalid status: %s", resp.Status)
+			}
+		}
 		return
 	})
 
@@ -110,4 +116,14 @@ func (c *Context) execHttpGetRequest(url string, headers http.Header) (*http.Res
 	}
 
 	return resp, nil
+}
+
+// See 2 (end of page 4) http://www.ietf.org/rfc/rfc2617.txt
+// "To receive authorization, the client sends the userid and password,
+// separated by a single colon (":") character, within a base64
+// encoded string in the credentials."
+// It is not meant to be urlencoded.
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
 }

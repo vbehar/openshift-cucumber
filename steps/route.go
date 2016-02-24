@@ -35,7 +35,7 @@ func init() {
 			}
 
 			host := fmt.Sprintf("http://%s/", route.Spec.Host)
-			resp, err := http.Get(host)
+			resp, err := c.execHttpGetRequest(host, make(http.Header))
 			if err != nil {
 				c.Fail("Failed to access the route '%s' at %s: %v", routeName, host, err)
 				return
@@ -57,14 +57,10 @@ func init() {
 			}
 
 			host := fmt.Sprintf("http://%s/", route.Spec.Host)
-			client := &http.Client{}
-			req, err := http.NewRequest("GET", host, nil)
-			if err != nil {
-				c.Fail("Failed to create request for URL %s: %v", host, err)
-				return
-			}
-			req.SetBasicAuth(login, password)
-			resp, err := client.Do(req)
+			requestHeaders := make(http.Header)
+			requestHeaders.Set("Authorization", "Basic "+basicAuth(login, password))
+
+			resp, err := c.execHttpGetRequest(host, requestHeaders)
 			if err != nil {
 				c.Fail("Failed to access the route '%s' at %s: %v", routeName, host, err)
 				return
