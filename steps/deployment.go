@@ -2,6 +2,7 @@ package steps
 
 import (
 	"fmt"
+	"io/ioutil"
 	"time"
 
 	deployapi "github.com/openshift/origin/pkg/deploy/api"
@@ -86,6 +87,12 @@ func init() {
 			}
 
 			if !success {
+				logs, err := c.GetDeploymentLogs(latestDeploymentName)
+				if err != nil {
+					fmt.Printf("Failed to get deployment logs '%v'\n", err)
+				} else {
+					fmt.Printf("Deployment logs '%v'\n", logs)
+				}
 				c.Fail("Deployment '%s' was not successful!", latestDeploymentName)
 				return
 			}
@@ -110,6 +117,12 @@ func init() {
 			}
 
 			if !successfulDeployment {
+				logs, err := c.GetDeploymentLogs(dcName)
+				if err != nil {
+					fmt.Printf("Failed to get deployment logs '%v'\n", err)
+				} else {
+					fmt.Printf("Deployment logs '%v'\n", logs)
+				}
 				c.Fail("No successful deployment for '%s'", dcName)
 				return
 			}
@@ -253,4 +266,30 @@ func (c *Context) IsDeploymentComplete(deploymentName string, timeout time.Durat
 	}
 
 	return false, nil
+}
+
+func (c *Context) GetDeploymentLogs(name string) (string, error) {
+	client, _, err := c.Clients()
+	if err != nil {
+		return "", err
+	}
+
+	namespace, err := c.Namespace()
+	if err != nil {
+		return "", err
+	}
+
+	readCloser, err := client.DeploymentLogs(namespace).Get(name, deployapi.DeploymentLogOptions{}).Stream()
+	if err != nil {
+		return "", err
+	}
+	defer readCloser.Close()
+
+	bytes, err := ioutil.ReadAll(readCloser)
+
+	if err != nil {
+		return "", err
+	}
+
+	return string(bytes), nil
 }
