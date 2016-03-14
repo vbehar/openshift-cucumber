@@ -2,6 +2,7 @@ package steps
 
 import (
 	"fmt"
+	"io/ioutil"
 	"time"
 
 	buildapi "github.com/openshift/origin/pkg/build/api"
@@ -63,6 +64,13 @@ func init() {
 			}
 
 			if !success {
+				logs, err := c.GetBuildLogs(latestBuildName)
+				if err != nil {
+					fmt.Printf("Failed to get build logs '%v'\n", err)
+				} else {
+					fmt.Printf("Build logs '%v'\n", logs)
+				}
+
 				c.Fail("Build '%s' was not successful!", latestBuildName)
 				return
 			}
@@ -161,4 +169,30 @@ func (c *Context) IsBuildComplete(buildName string, timeout time.Duration) (bool
 	}
 
 	return false, nil
+}
+
+func (c *Context) GetBuildLogs(buildName string) (string, error) {
+	client, _, err := c.Clients()
+	if err != nil {
+		return "", err
+	}
+
+	namespace, err := c.Namespace()
+	if err != nil {
+		return "", err
+	}
+
+	readCloser, err := client.BuildLogs(namespace).Get(buildName, buildapi.BuildLogOptions{}).Stream()
+	if err != nil {
+		return "", err
+	}
+	defer readCloser.Close()
+
+	bytes, err := ioutil.ReadAll(readCloser)
+
+	if err != nil {
+		return "", err
+	}
+
+	return string(bytes), nil
 }
