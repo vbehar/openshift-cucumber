@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"io/ioutil"
@@ -85,6 +86,9 @@ func (c *Context) execHttpGetRequest(url string, headers http.Header) (*http.Res
 		Dial: (&net.Dialer{
 			Timeout: 5 * time.Second,
 		}).Dial,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
 	}
 	client := &http.Client{
 		Transport: transport,

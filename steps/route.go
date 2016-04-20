@@ -34,10 +34,10 @@ func init() {
 				return
 			}
 
-			host := fmt.Sprintf("http://%s/", route.Spec.Host)
-			resp, err := c.execHttpGetRequest(host, make(http.Header))
+			url := routeURL(route)
+			resp, err := c.execHttpGetRequest(url, make(http.Header))
 			if err != nil {
-				c.Fail("Failed to access the route '%s' at %s: %v", routeName, host, err)
+				c.Fail("Failed to access the route '%s' at %s: %v", routeName, url, err)
 				return
 			}
 
@@ -56,13 +56,13 @@ func init() {
 				return
 			}
 
-			host := fmt.Sprintf("http://%s/", route.Spec.Host)
+			url := routeURL(route)
 			requestHeaders := make(http.Header)
 			requestHeaders.Set("Authorization", "Basic "+basicAuth(login, password))
 
-			resp, err := c.execHttpGetRequest(host, requestHeaders)
+			resp, err := c.execHttpGetRequest(url, requestHeaders)
 			if err != nil {
-				c.Fail("Failed to access the route '%s' at %s: %v", routeName, host, err)
+				c.Fail("Failed to access the route '%s' at %s: %v", routeName, url, err)
 				return
 			}
 
@@ -91,4 +91,19 @@ func (c *Context) GetRoute(routeName string) (*routeapi.Route, error) {
 	}
 
 	return route, nil
+}
+
+// routeURL returns the base URL for the given route
+// taking care to use the right scheme based on the route TLS config
+func routeURL(route *routeapi.Route) string {
+	scheme := "http"
+	if route.Spec.TLS != nil {
+		switch route.Spec.TLS.Termination {
+		case routeapi.TLSTerminationEdge,
+			routeapi.TLSTerminationPassthrough,
+			routeapi.TLSTerminationReencrypt:
+			scheme = "https"
+		}
+	}
+	return fmt.Sprintf("%s://%s/", scheme, route.Spec.Host)
 }
