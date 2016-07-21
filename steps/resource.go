@@ -109,7 +109,7 @@ func (c *Context) deleteResourcesBySelect(fn selectFunc) error {
 			ContinueOnError().
 			NamespaceParam(namespace).DefaultNamespace().
 			FilenameParam(true).
-			ResourceTypeOrNameArgs(false, "template,buildconfig,build,imagestream,deploymentconfig,replicationcontroller,pod,service,route").
+			ResourceTypeOrNameArgs(false, "template,buildconfig,build,imagestream,deploymentconfig,replicationcontroller,pod,service,route,pvc").
 			RequireObject(false)).
 		Flatten().
 		Do()
