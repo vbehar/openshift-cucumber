@@ -17,7 +17,7 @@ import (
 func init() {
 	RegisterSteps(func(c *Context) {
 
-		c.When(`^I create a new application based on the template "(.+?)"$`, func(templateName string) {
+		c.When(`^I create a new application based on the template "([^\"]+?)"$`, func(templateName string) {
 			if _, errs := c.NewAppFromTemplate(templateName, []string{}); len(errs) > 0 {
 				c.Fail("Failed to create a new application based on the template '%s': %v", templateName, errs)
 				return
