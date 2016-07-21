@@ -63,11 +63,33 @@ func init() {
 			}
 		})
 
+		c.When(`^I delete all resources$`, func() {
+			err := c.DeleteAllResources()
+			if err != nil {
+				c.Fail("Failed to delete all resources: %v", err)
+				return
+			}
+		})
+	})
+}
+
+// DeleteAllResources deletes all resources
+func (c *Context) DeleteAllResources() error {
+	return c.deleteResourcesBySelect(func(builder *resource.Builder) *resource.Builder {
+		return builder.SelectAllParam(true)
 	})
 }
 
 // DeleteResourcesBySelector deletes all resources matching the given label selector
 func (c *Context) DeleteResourcesBySelector(selector string) error {
+	return c.deleteResourcesBySelect(func(builder *resource.Builder) *resource.Builder {
+		return builder.SelectorParam(selector).SelectAllParam(false)
+	})
+}
+
+type selectFunc func(*resource.Builder) *resource.Builder
+
+func (c *Context) deleteResourcesBySelect(fn selectFunc) error {
 	factory, err := c.Factory()
 	if err != nil {
 		return err
@@ -81,15 +103,14 @@ func (c *Context) DeleteResourcesBySelector(selector string) error {
 	mapper, typer := factory.Object()
 	clientMapper := factory.ClientMapperForCommand()
 
-	r := resource.
-		NewBuilder(mapper, typer, clientMapper).
-		ContinueOnError().
-		NamespaceParam(namespace).DefaultNamespace().
-		FilenameParam(true).
-		SelectorParam(selector).
-		SelectAllParam(false).
-		ResourceTypeOrNameArgs(false, "template,buildconfig,build,imagestream,deploymentconfig,replicationcontroller,pod,service,route").
-		RequireObject(false).
+	r := fn(
+		resource.
+			NewBuilder(mapper, typer, clientMapper).
+			ContinueOnError().
+			NamespaceParam(namespace).DefaultNamespace().
+			FilenameParam(true).
+			ResourceTypeOrNameArgs(false, "template,buildconfig,build,imagestream,deploymentconfig,replicationcontroller,pod,service,route").
+			RequireObject(false)).
 		Flatten().
 		Do()
 
